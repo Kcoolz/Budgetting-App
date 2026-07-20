@@ -20,20 +20,29 @@ times more than a household budget will ever use.
    - Disable Google Analytics when asked (not needed).
    - **Do not** add a billing account or upgrade the plan — stay on **Spark**.
 
-2. **Enable Google sign-in:** in the left menu, **Build → Authentication →
-   Get started → Sign-in method → Google → Enable**. Pick a support email,
-   save.
+2. **Enable Google sign-in:** open
+   <https://console.firebase.google.com/project/budgetapp-c0b0a/authentication/providers>
+   (or click **Authentication** in the left sidebar — newer consoles pin it
+   under *Project shortcuts* instead of the old "Build" menu). Click
+   **Get started** if prompted, then **Sign-in method → Google → Enable**.
+   Pick a support email, save.
 
-3. **Create the database:** **Build → Firestore Database → Create database**.
+3. **Create the database:** open
+   <https://console.firebase.google.com/project/budgetapp-c0b0a/firestore>
+   (left sidebar: **Product categories → Databases & Storage → Firestore
+   Database**) → **Create database**.
    - Choose a region close to you (e.g. `northamerica-northeast2` / Toronto —
      cannot be changed later).
    - Start in **production mode** (locked). The next step opens it to just
      the two of you.
 
-4. **Publish the security rules:** open the **Rules** tab, delete what's
-   there, and paste the entire contents of [`firestore.rules`](firestore.rules)
-   from this project. **Replace the two placeholder emails with your and your
-   girlfriend's Google account emails (lowercase)**, then click **Publish**.
+4. **Publish the security rules:** open the **Rules** tab
+   (<https://console.firebase.google.com/project/budgetapp-c0b0a/firestore/rules>),
+   delete what's there, and paste the entire contents of
+   [`firestore.rules`](firestore.rules) from this project. **Replace the two
+   placeholder emails with your and your girlfriend's Google account emails
+   (lowercase)**, then click **Publish**. The copy in this repo is just a
+   template — only what's published in the console counts.
 
    > This allowlist is the lock on the door. Only those Google accounts can
    > read or write the budget — enforced by Google's servers, not by the app.
@@ -47,33 +56,31 @@ times more than a household budget will ever use.
    - These values are safe to commit — they're public identifiers, not secrets.
 
 6. **Authorize your dev machine:** **Authentication → Settings → Authorized
-   domains → Add domain** → add `127.0.0.1` (the dev server runs there;
-   `localhost` is pre-authorized but `127.0.0.1` is not).
+   domains → Add domain**
+   (<https://console.firebase.google.com/project/budgetapp-c0b0a/authentication/settings>)
+   → add `127.0.0.1` (the dev server runs there; `localhost` is
+   pre-authorized but `127.0.0.1` is not).
 
 ## Part 2 — GitHub Pages (~5 min)
 
 GitHub Pages on a free account requires the repository to be **public**. That's
 fine: the repo contains only app code, no budget data and no secrets.
 
-1. Create an empty **public** repo at <https://github.com/new> (e.g.
-   `cloud-budget`). Don't add a README/gitignore — the project already has them.
+1. Make the repo (<https://github.com/Kcoolz/Budgetting-App>) **public**:
+   **Settings → General → Danger Zone → Change visibility → Public**. The
+   repo contains only app code — the Firebase config values are public
+   identifiers by design, and your budget data never touches the repo.
 
-2. Push this project (the local git repo and deploy workflow already exist):
-
-   ```
-   git remote add origin https://github.com/YOUR_USERNAME/cloud-budget.git
-   git push -u origin main
-   ```
-
-3. In the repo on github.com: **Settings → Pages → Build and deployment →
-   Source** → select **GitHub Actions**. The included workflow
+2. Enable Pages: **Settings → Pages → Build and deployment → Source** →
+   select **GitHub Actions**. The included workflow
    (`.github/workflows/deploy-pages.yml`) builds and deploys on every push to
-   `main`. First deploy takes ~2 minutes; the URL will be
-   `https://YOUR_USERNAME.github.io/cloud-budget/`.
+   `main`. First deploy takes ~2 minutes; the site will be at
+   <https://kcoolz.github.io/Budgetting-App/>.
 
-4. **Authorize the live site in Firebase:** back in **Authentication →
-   Settings → Authorized domains → Add domain** → add
-   `YOUR_USERNAME.github.io`. Without this, Google sign-in is blocked on the
+3. **Authorize the live site in Firebase:** back in **Authentication →
+   Settings → Authorized domains → Add domain**
+   (<https://console.firebase.google.com/project/budgetapp-c0b0a/authentication/settings>)
+   → add `kcoolz.github.io`. Without this, Google sign-in is blocked on the
    live site.
 
 ## Part 3 — First sign-in (important: order matters)
