@@ -1,0 +1,156 @@
+import { useEffect, useState } from "react";
+import { Repeat2 } from "lucide-react";
+import {
+  RECURRENCE_OPTIONS,
+  dateForMonth,
+  expenseCategoriesFor,
+  expenseSubcategoriesFor,
+  guessSubcategory,
+  incomeCategoriesFor
+} from "../lib/budget";
+import Button from "./ui/Button";
+import ModalShell from "./ui/ModalShell";
+
+function currencySymbol(currency) {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency })
+    .formatToParts(0)
+    .find(({ type }) => type === "currency")?.value ?? "$";
+}
+
+export default function TransactionModal({ open, onClose, onSave, onTransfer, currency, selectedMonth, accounts = [], profileType = "personal" }) {
+  const [type, setType] = useState("expense");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(dateForMonth(selectedMonth));
+  const [category, setCategory] = useState("housing");
+  const [subcategory, setSubcategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [recurring, setRecurring] = useState(false);
+  const [frequency, setFrequency] = useState("monthly");
+  const expenseCategories = expenseCategoriesFor(profileType);
+  const incomeCategories = incomeCategoriesFor(profileType);
+  const categories = type === "income" ? incomeCategories : expenseCategories;
+  const subcategories = expenseSubcategoriesFor(profileType).filter((item) => item.category === category);
+
+  useEffect(() => {
+    if (!open) return;
+    setType("expense");
+    setAmount("");
+    setDate(dateForMonth(selectedMonth));
+    setCategory("housing");
+    setSubcategory("");
+    setDescription("");
+    setAccountId(accounts[0]?.id ?? "");
+    setRecurring(false);
+    setFrequency("monthly");
+  }, [open, selectedMonth, accounts]);
+
+  useEffect(() => {
+    setCategory(type === "income" ? incomeCategories[0].id : expenseCategories[0].id);
+    setSubcategory("");
+  }, [type, profileType]);
+
+  const submit = (event) => {
+    event.preventDefault();
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0 || !description.trim()) return;
+    onSave({
+      type,
+      amount: numericAmount,
+      date,
+      category,
+      description: description.trim(),
+      accountId,
+      ...(type === "expense" ? { subcategory: subcategory || guessSubcategory(description, category, profileType) } : {}),
+      recurrence: type === "expense" && recurring ? frequency : null
+    });
+  };
+
+  const inputClass = "min-h-11 w-full rounded-xl border border-black/8 bg-white px-3 text-sm text-ink-900 outline-none transition-all focus:border-forest-700/30 focus:ring-4 focus:ring-forest-700/10";
+
+  return (
+    <ModalShell open={open} onClose={onClose} eyebrow="New activity" title="Add activity">
+      <form onSubmit={submit} className="px-5 pb-6 pt-6 sm:px-7 sm:pb-7">
+        <fieldset className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
+          <legend className="sr-only">Transaction type</legend>
+          {["expense", "income"].map((value) => (
+            <label key={value} className="cursor-pointer">
+              <input className="peer sr-only" type="radio" name="type" value={value} checked={type === value} onChange={() => setType(value)} />
+              <span className="grid min-h-10 place-items-center rounded-lg text-xs font-bold capitalize text-slate-500 transition-all peer-checked:bg-white peer-checked:text-ink-900 peer-checked:shadow-sm">{value}</span>
+            </label>
+          ))}
+          <button type="button" onClick={onTransfer} className="interactive-button flex min-h-10 items-center justify-center gap-1.5 rounded-lg text-xs font-bold text-slate-500 hover:bg-white hover:text-ink-900 hover:shadow-sm"><Repeat2 className="size-3.5" /> Transfer</button>
+        </fieldset>
+
+        <label className="mt-5 grid gap-2 text-xs font-semibold text-slate-600">
+          Amount
+          <span className="flex items-center rounded-xl border border-black/8 focus-within:border-forest-700/30 focus-within:ring-4 focus-within:ring-forest-700/10">
+            <span className="pl-4 font-display text-2xl text-slate-400">{currencySymbol(currency)}</span>
+            <input autoFocus value={amount} onChange={(event) => setAmount(event.target.value)} className="min-h-14 min-w-0 flex-1 border-0 bg-transparent px-3 font-display text-2xl outline-none" type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0.00" required />
+          </span>
+        </label>
+
+        <label className="mt-4 grid gap-2 text-xs font-semibold text-slate-600">
+          Account
+          <select value={accountId} onChange={(event) => setAccountId(event.target.value)} className={inputClass} required>
+            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+          </select>
+        </label>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-2 text-xs font-semibold text-slate-600">
+            Date
+            <input value={date} onChange={(event) => setDate(event.target.value)} className={inputClass} type="date" required />
+          </label>
+          <label className="grid gap-2 text-xs font-semibold text-slate-600">
+            Category
+            <select value={category} onChange={(event) => {
+              setCategory(event.target.value);
+              setSubcategory("");
+            }} className={inputClass} required>
+              {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+        </div>
+
+        {type === "expense" && (
+          <label className="mt-4 grid gap-2 text-xs font-semibold text-slate-600">
+            Spending detail
+            <select value={subcategory} onChange={(event) => setSubcategory(event.target.value)} className={inputClass}>
+              <option value="">Choose automatically from description</option>
+              {subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+        )}
+
+        <label className="mt-4 grid gap-2 text-xs font-semibold text-slate-600">
+          Description
+          <input value={description} onChange={(event) => setDescription(event.target.value)} className={inputClass} maxLength="80" placeholder="e.g. Weekly groceries" required />
+        </label>
+
+        {type === "expense" && (
+          <div className="mt-4 rounded-xl border border-black/5 bg-slate-50/70 p-3.5">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input type="checkbox" checked={recurring} onChange={(event) => setRecurring(event.target.checked)} className="size-4 accent-forest-800" />
+              <span className="grid size-8 place-items-center rounded-lg bg-forest-50 text-forest-700"><Repeat2 className="size-3.5" /></span>
+              <span className="flex-1"><strong className="block text-xs">This is a recurring bill</strong><span className="mt-0.5 block text-[10px] font-normal text-slate-400">Create an upcoming schedule from this transaction.</span></span>
+            </label>
+            {recurring && (
+              <label className="mt-3 grid gap-2 border-t border-black/5 pt-3 text-xs font-semibold text-slate-600">
+                Repeats
+                <select value={frequency} onChange={(event) => setFrequency(event.target.value)} className={inputClass}>
+                  {RECURRENCE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+        )}
+
+        <div className="mt-7 flex justify-end gap-2 border-t border-black/5 pt-5">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary">Save transaction</Button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
