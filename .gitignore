@@ -1,6 +1,7 @@
 node_modules/
 dist/
-*.local
+.vite/
 *.log
-.DS_Store
-.gstack/
+.env
+.env.*
+!.env.example

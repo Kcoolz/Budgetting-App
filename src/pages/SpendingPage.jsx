@@ -4,6 +4,7 @@ import DebtPlanner from "../components/DebtPlanner";
 import FlexibleSpendingCard from "../components/FlexibleSpendingCard";
 import PageIntro from "../components/PageIntro";
 import Button from "../components/ui/Button";
+import { expenseCategoriesFor } from "../lib/budget";
 
 export default function SpendingPage({
   monthLabel,
@@ -18,6 +19,7 @@ export default function SpendingPage({
   profileType = "personal"
 }) {
   const business = profileType === "business";
+  const categories = expenseCategoriesFor(profileType, state);
   return (
     <>
       <PageIntro
@@ -29,7 +31,7 @@ export default function SpendingPage({
       <div className="grid gap-4">
         <BillsFocusCard bills={state.recurringBills} budgets={summary.effectiveBudgets} spending={summary.categorySpending} currency={state.currency} profileType={profileType} />
       </div>
-      <div className="mt-4"><FlexibleSpendingCard budgets={summary.effectiveBudgets} spending={summary.categorySpending} currency={state.currency} onManage={onManageBudget} profileType={profileType} /></div>
+      <div className="mt-4"><FlexibleSpendingCard budgets={summary.effectiveBudgets} spending={summary.categorySpending} currency={state.currency} onManage={onManageBudget} categories={categories} profileType={profileType} /></div>
       <div className="mt-4"><DebtPlanner debts={debts} plan={state.debtPlan} currency={state.currency} onAdd={onAddDebt} onEdit={onEditDebt} onDelete={onDeleteDebt} onPlanChange={onDebtPlanChange} profileType={profileType} /></div>
     </>
   );

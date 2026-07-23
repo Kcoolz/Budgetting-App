@@ -2,16 +2,16 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
 import App from "./App";
-import AuthGate from "./components/AuthGate";
+import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <HashRouter>
-      <AuthGate>
+    <ErrorBoundary>
+      <HashRouter>
         <App />
-      </AuthGate>
-    </HashRouter>
+      </HashRouter>
+    </ErrorBoundary>
   </StrictMode>
 );
 

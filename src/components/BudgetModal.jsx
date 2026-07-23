@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Upload } from "lucide-react";
-import { EXPENSE_CATEGORIES } from "../lib/budget";
+import { Download, RotateCcw, Sparkles, Upload } from "lucide-react";
+import { EXPENSE_CATEGORIES, formatMoney, getBaseBudgets, sum } from "../lib/budget";
 import Button from "./ui/Button";
 import ModalShell from "./ui/ModalShell";
 
@@ -18,19 +18,37 @@ function currencySymbol(currency) {
     .find(({ type }) => type === "currency")?.value ?? "$";
 }
 
-export default function BudgetModal({ open, onClose, state, selectedMonth, onSave, onExport, onImport, categories = EXPENSE_CATEGORIES, profileType = "personal" }) {
+export default function BudgetModal({ open, onClose, state, selectedMonth, recordedIncome = 0, onSave, onExport, onImport, categories = EXPENSE_CATEGORIES, profileType = "personal" }) {
   const business = profileType === "business";
   const [currency, setCurrency] = useState(state.currency);
-  const [budgets, setBudgets] = useState(state.budgets);
+  const [budgets, setBudgets] = useState(() => getBaseBudgets(state, selectedMonth));
   const [rolloverEnabled, setRolloverEnabled] = useState(state.rollover?.enabled ?? false);
   const fileInput = useRef(null);
 
   useEffect(() => {
     if (!open) return;
     setCurrency(state.currency);
-    setBudgets({ ...state.budgets });
+    setBudgets(getBaseBudgets(state, selectedMonth));
     setRolloverEnabled(state.rollover?.enabled ?? false);
-  }, [open, state.currency, state.budgets, state.rollover?.enabled]);
+  }, [open, selectedMonth, state.currency, state.budgets, state.monthlyBudgets, state.rollover?.enabled]);
+
+  const plannedTotal = sum(Object.values(budgets));
+  const leftToAssign = recordedIncome - plannedTotal;
+  const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
+    .format(new Date(`${selectedMonth}-01T12:00:00`));
+
+  const fitPlanToIncome = () => {
+    if (recordedIncome <= 0) return;
+    const defaults = { housing: 0.35, food: 0.15, transport: 0.1, bills: 0.15, fun: 0.08, health: 0.07, shopping: 0.05, other: 0.05 };
+    let allocated = 0;
+    const fitted = Object.fromEntries(categories.map((category, index) => {
+      const weight = plannedTotal > 0 ? (Number(budgets[category.id]) || 0) / plannedTotal : defaults[category.id] ?? 0;
+      const amount = index === categories.length - 1 ? Math.max(recordedIncome - allocated, 0) : Math.round(recordedIncome * weight);
+      allocated += amount;
+      return [category.id, amount];
+    }));
+    setBudgets(fitted);
+  };
 
   const submit = (event) => {
     event.preventDefault();
@@ -59,8 +77,8 @@ export default function BudgetModal({ open, onClose, state, selectedMonth, onSav
         </label>
 
         <div className="mb-2 mt-6 flex justify-between text-xs">
-          <strong>{business ? "Operating limits" : "Category limits"}</strong>
-          <span className="text-slate-400">per month</span>
+          <div><strong>{business ? "Operating limits" : `Category limits for ${monthLabel}`}</strong><span className="mt-1 block text-[10px] font-normal text-slate-400">Saved separately for this month.</span></div>
+          <Button type="button" onClick={fitPlanToIncome} disabled={recordedIncome <= 0} className="min-h-9 px-3 text-[11px]"><Sparkles className="size-3.5" /> Fit to income</Button>
         </div>
         <div className="grid gap-x-5 sm:grid-cols-2">
           {categories.map((category) => (
@@ -82,6 +100,13 @@ export default function BudgetModal({ open, onClose, state, selectedMonth, onSav
               </span>
             </label>
           ))}
+        </div>
+
+        <div className={`mt-5 grid gap-3 rounded-xl border p-4 sm:grid-cols-3 ${leftToAssign < 0 ? "border-rose-200 bg-rose-50/70" : "border-emerald-100 bg-emerald-50/60"}`}>
+          <div><span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Income received</span><strong className="mt-1 block text-sm">{formatMoney(recordedIncome, currency)}</strong></div>
+          <div><span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Category plan</span><strong className="mt-1 block text-sm">{formatMoney(plannedTotal, currency)}</strong></div>
+          <div><span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{leftToAssign < 0 ? "Over income by" : "Income unassigned"}</span><strong className={`mt-1 block text-sm ${leftToAssign < 0 ? "text-rose-700" : "text-emerald-700"}`}>{formatMoney(Math.abs(leftToAssign), currency)}</strong></div>
+          <p className="sm:col-span-3 text-[11px] leading-relaxed text-slate-500">Safe-to-spend is capped by income actually recorded for this month, even when category limits are higher.</p>
         </div>
 
         <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-black/5 bg-slate-50/70 p-4">

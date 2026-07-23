@@ -9,7 +9,7 @@ const variants = {
 export default function Button({ variant = "secondary", className = "", children, ...props }) {
   return (
     <button
-      className={`interactive-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold ${variants[variant]} ${className}`}
+      className={`interactive-button inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
       {...props}
     >
       {children}

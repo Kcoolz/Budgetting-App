@@ -1,18 +1,39 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, LogOut, Settings, UsersRound } from "lucide-react";
+import { Check, ChevronDown, Settings, UsersRound } from "lucide-react";
 import ProfileAvatar from "./ProfileAvatar";
 
-export default function ProfileMenu({ profiles, activeProfile, onSwitch, onManage, account = null, onSignOut }) {
+export default function ProfileMenu({ profiles, activeProfile, onSwitch, onManage }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
     const close = (event) => {
       if (!menuRef.current?.contains(event.target)) setOpen(false);
     };
+    const handleKey = (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+      const items = [...(menuRef.current?.querySelectorAll('[role^="menuitem"]') ?? [])];
+      if (!items.length) return;
+      event.preventDefault();
+      const currentIndex = items.indexOf(document.activeElement);
+      const offset = event.key === "ArrowDown" ? 1 : -1;
+      items[(currentIndex + offset + items.length) % items.length].focus();
+    };
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", handleKey);
+    const focusFirst = requestAnimationFrame(() => menuRef.current?.querySelector('[role^="menuitem"]')?.focus());
+    return () => {
+      cancelAnimationFrame(focusFirst);
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [open]);
 
   const chooseProfile = (id) => {
@@ -23,6 +44,7 @@ export default function ProfileMenu({ profiles, activeProfile, onSwitch, onManag
   return (
     <div ref={menuRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
         className="interactive-button flex min-h-10 items-center gap-2 rounded-xl border border-black/8 bg-white p-1.5 text-left hover:border-forest-700/25 hover:bg-forest-50 sm:pr-2.5"
@@ -71,23 +93,6 @@ export default function ProfileMenu({ profiles, activeProfile, onSwitch, onManag
             >
               <Settings className="size-4" /> Manage profiles
             </button>
-            {account && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onSignOut?.();
-                }}
-                className="interactive-button flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-ink-900"
-                role="menuitem"
-              >
-                <LogOut className="size-4" />
-                <span className="min-w-0 flex-1">
-                  <span className="block">Sign out</span>
-                  <span className="mt-0.5 block truncate text-[9px] font-medium normal-case text-slate-400">{account.email}</span>
-                </span>
-              </button>
-            )}
           </div>
         </div>
       )}

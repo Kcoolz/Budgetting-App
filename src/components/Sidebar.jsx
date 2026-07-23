@@ -3,15 +3,9 @@ import { NavLink } from "react-router";
 import Brand from "./Brand";
 import { navigationFor } from "./navigation";
 
-export default function Sidebar({ profileType = "personal", cloudSyncActive = false }) {
+export default function Sidebar({ profileType = "personal" }) {
   const business = profileType === "business";
   const navigation = navigationFor(profileType);
-  const storageTitle = cloudSyncActive
-    ? "Synced for your household"
-    : business ? "Business data stays local" : "Stored on this device";
-  const storageDetail = cloudSyncActive
-    ? "Only invited Google accounts can see this budget."
-    : business ? "Your ledger remains private in this browser." : "Your financial data stays private in this browser.";
   return (
     <aside className={`fixed inset-y-0 left-0 z-20 hidden w-60 flex-col px-5 py-7 text-white lg:flex ${business ? "bg-[#102c2b]" : "bg-forest-900"}`} aria-label="Primary navigation">
       <Brand />
@@ -39,8 +33,8 @@ export default function Sidebar({ profileType = "personal", cloudSyncActive = fa
           <ShieldCheck className="size-4" />
         </span>
         <div>
-          <strong className="text-xs font-semibold">{storageTitle}</strong>
-          <p className="mt-1 text-[11px] leading-relaxed text-white/55">{storageDetail}</p>
+          <strong className="text-xs font-semibold">{business ? "Business data stays local" : "Stored on this device"}</strong>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/55">{business ? "Your ledger remains private in this browser." : "Your financial data stays private in this browser."}</p>
         </div>
       </div>
     </aside>

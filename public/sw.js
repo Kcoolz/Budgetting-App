@@ -1,4 +1,4 @@
-const CACHE_NAME = "cloud-budget-v2";
+const CACHE_NAME = "cloud-budget-v3";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/cloud.svg", "./icons/maskable.svg"];
 
 self.addEventListener("install", (event) => {

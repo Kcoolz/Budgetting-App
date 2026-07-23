@@ -11,13 +11,15 @@ const groups = [
 const icons = { housing: Building2, bills: Laptop, food: Utensils, transport: Bus, health: HeartPulse, fun: Sparkles, shopping: ShoppingBag, other: MoreHorizontal };
 const toneClasses = { healthy: "bg-emerald-600", warning: "bg-amber-400", danger: "bg-rose-400" };
 
-export default function FlexibleSpendingCard({ budgets, spending, currency, onManage, profileType = "personal" }) {
+export default function FlexibleSpendingCard({ budgets, spending, currency, onManage, categories: providedCategories, profileType = "personal" }) {
   const business = profileType === "business";
-  const categories = expenseCategoriesFor(profileType);
-  const visibleGroups = business ? [
+  const categories = providedCategories ?? expenseCategoriesFor(profileType);
+  const customIds = categories.filter(({ id }) => id.startsWith("custom-")).map(({ id }) => id);
+  const baseGroups = business ? [
     { id: "core", name: "Core operations", description: "Workspace, software, and people", ids: ["housing", "bills", "health"] },
     { id: "growth", name: "Variable and growth costs", description: "Marketing, travel, meals, and equipment", ids: ["fun", "transport", "food", "shopping", "other"] }
   ] : groups;
+  const visibleGroups = customIds.length ? [...baseGroups, { id: "custom", name: "Your categories", description: "Custom spending areas", ids: customIds }] : baseGroups;
   return (
     <Card className="p-5 sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -43,7 +45,7 @@ export default function FlexibleSpendingCard({ budgets, spending, currency, onMa
               <div className="mt-5 grid gap-4">
                 {group.ids.map((id) => {
                   const category = categories.find((item) => item.id === id);
-                  const Icon = icons[id];
+                  const Icon = icons[id] ?? MoreHorizontal;
                   const budget = Number(budgets[id]) || 0;
                   const spent = Number(spending[id]) || 0;
                   const percent = budget > 0 ? spent / budget * 100 : spent > 0 ? 100 : 0;

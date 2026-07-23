@@ -9,12 +9,13 @@ import {
   PiggyBank,
   Plus,
   Repeat2,
+  Scale,
   Trash2,
   TrendingUp,
   Wallet
 } from "lucide-react";
-import { accountHasActivity, getAccountOverview, getAccountType, isLiabilityAccount } from "../lib/accounts";
-import { formatMoney } from "../lib/budget";
+import { accountHasActivity, getAccountBalances, getAccountOverview, getAccountType, isLiabilityAccount } from "../lib/accounts";
+import { formatMoney, localDate } from "../lib/budget";
 import Card from "../components/ui/Card";
 import Button from "../components/ui/Button";
 import PageIntro from "../components/PageIntro";
@@ -42,9 +43,10 @@ function Metric({ label, value, tone = "default" }) {
   );
 }
 
-export default function AccountsPage({ state, profileType = "personal", onAddAccount, onEditAccount, onDeleteAccount, onAddTransfer, onDeleteTransfer }) {
+export default function AccountsPage({ state, profileType = "personal", onAddAccount, onEditAccount, onDeleteAccount, onReconcileAccount, onAddTransfer, onEditTransfer, onDeleteTransfer }) {
   const business = profileType === "business";
-  const { balances, assets, liabilities, netWorth } = getAccountOverview(state);
+  const { balances, assets, liabilities, netWorth } = getAccountOverview(state, localDate());
+  const clearedBalances = getAccountBalances(state, localDate(), true);
   const accountNames = Object.fromEntries(state.accounts.map(({ id, name }) => [id, name]));
   const transfers = [...state.transfers].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -94,11 +96,13 @@ export default function AccountsPage({ state, profileType = "personal", onAddAcc
               const hasActivity = accountHasActivity(state, account.id);
               const canDelete = state.accounts.length > 1 && !hasActivity;
               const balanceLabel = liability ? (balance > 0 ? "Credit balance" : "Amount owed") : "Current balance";
+              const lastReconciliation = [...(state.reconciliations ?? [])].filter(({ accountId }) => accountId === account.id).sort((a, b) => b.date.localeCompare(a.date))[0];
               return (
                 <article key={account.id} className="group rounded-2xl border border-black/[0.065] bg-slate-50/45 p-4 transition-colors hover:bg-white hover:shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <span className={`grid size-10 place-items-center rounded-xl ${liability ? "bg-rose-50 text-rose-700" : business ? "bg-teal-50 text-teal-800" : "bg-blue-50 text-blue-700"}`}><Icon className="size-[18px]" /></span>
                     <div className="flex gap-1">
+                      <button onClick={() => onReconcileAccount(account)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-emerald-50 hover:text-emerald-700" aria-label={`Reconcile ${account.name}`} title="Reconcile statement"><Scale className="size-3.5" /></button>
                       <button onClick={() => onEditAccount(account)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-white hover:text-ink-900" aria-label={`Edit ${account.name}`}><Pencil className="size-3.5" /></button>
                       <button onClick={() => onDeleteAccount(account)} disabled={!canDelete} title={!canDelete ? (hasActivity ? "Remove linked activity before deleting this account" : "At least one account is required") : "Delete account"} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 enabled:hover:bg-rose-50 enabled:hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30" aria-label={`Delete ${account.name}`}><Trash2 className="size-3.5" /></button>
                     </div>
@@ -108,7 +112,7 @@ export default function AccountsPage({ state, profileType = "personal", onAddAcc
                     <span className="mt-0.5 block text-[10px] text-slate-400">{getAccountType(account.type).name}</span>
                   </div>
                   <div className="mt-5 flex items-end justify-between gap-3 border-t border-black/5 pt-3">
-                    <span className="text-[10px] font-semibold text-slate-400">{balanceLabel}</span>
+                    <span className="text-[10px] font-semibold text-slate-400">{balanceLabel}<span className="mt-1 block font-normal">Cleared {formatMoney(liability && clearedBalances[account.id] <= 0 ? Math.abs(clearedBalances[account.id]) : clearedBalances[account.id], state.currency)}</span>{lastReconciliation && <span className="mt-1 block font-normal text-emerald-700">Checked {lastReconciliation.date}</span>}</span>
                     <strong className={`text-base ${liability && balance <= 0 ? "text-rose-700" : "text-ink-900"}`}>{formatMoney(liability && balance <= 0 ? Math.abs(balance) : balance, state.currency)}</strong>
                   </div>
                 </article>
@@ -137,14 +141,17 @@ export default function AccountsPage({ state, profileType = "personal", onAddAcc
           ) : (
             <div className="border-t border-black/5">
               {transfers.slice(0, 8).map((transfer) => (
-                <article key={transfer.id} className="group grid grid-cols-[minmax(0,1fr)_auto_28px] items-center gap-3 border-t border-black/[0.045] px-5 py-4 first:border-t-0">
+                <article key={transfer.id} className="group grid grid-cols-[minmax(0,1fr)_auto_68px] items-center gap-3 border-t border-black/[0.045] px-5 py-4 first:border-t-0">
                   <div className="min-w-0">
                     <strong className="block truncate text-xs">{transfer.description}</strong>
                     <span className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-slate-400"><span className="truncate">{accountNames[transfer.fromAccountId]}</span><ArrowRight className="size-3 shrink-0" /><span className="truncate">{accountNames[transfer.toAccountId]}</span></span>
                     <time className="mt-1 block text-[9px] text-slate-400" dateTime={transfer.date}>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${transfer.date}T12:00:00`))}</time>
                   </div>
                   <strong className="text-xs">{formatMoney(transfer.amount, state.currency)}</strong>
-                  <button onClick={() => onDeleteTransfer(transfer)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100" aria-label={`Delete ${transfer.description}`}><Trash2 className="size-3.5" /></button>
+                  <div className="flex md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
+                    <button onClick={() => onEditTransfer(transfer)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-white hover:text-ink-900" aria-label={`Edit ${transfer.description}`}><Pencil className="size-3.5" /></button>
+                    <button onClick={() => onDeleteTransfer(transfer)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${transfer.description}`}><Trash2 className="size-3.5" /></button>
+                  </div>
                 </article>
               ))}
             </div>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Fuel, Laptop, Megaphone, Plane, ShoppingBasket, TrendingDown, TrendingUp, Utensils } from "lucide-react";
+import { Download, Fuel, Laptop, Megaphone, Plane, ShoppingBasket, TrendingDown, TrendingUp, Utensils } from "lucide-react";
 import PageIntro from "../components/PageIntro";
 import Card from "../components/ui/Card";
 import {
@@ -9,8 +9,10 @@ import {
   expenseSubcategoriesFor,
   formatMoney,
   getSpendingTrends,
+  localDate,
   sum
 } from "../lib/budget";
+import { getNetWorthHistory, transactionsToCsv } from "../lib/planning";
 
 const spotlights = [
   { id: "dining-out", label: "Dining out", description: "Restaurants and takeout", icon: Utensils },
@@ -45,12 +47,13 @@ function comparisonLabel(current, previous) {
 
 export default function TrendsPage({ state, endMonth, profileType = "personal" }) {
   const business = profileType === "business";
-  const categories = expenseCategoriesFor(profileType);
-  const subcategories = expenseSubcategoriesFor(profileType);
+  const categories = expenseCategoriesFor(profileType, state);
+  const subcategories = expenseSubcategoriesFor(profileType, state);
   const visibleSpotlights = business ? businessSpotlights : spotlights;
   const [period, setPeriod] = useState(6);
   const [filter, setFilter] = useState("all");
   const trends = useMemo(() => getSpendingTrends(state, endMonth, period, profileType), [state, endMonth, period, profileType]);
+  const netWorthHistory = useMemo(() => getNetWorthHistory(state, endMonth, 12), [state, endMonth]);
   const meta = filterMeta(filter, categories, subcategories);
   const values = trends.map(meta.read);
   const current = values.at(-1) ?? 0;
@@ -76,6 +79,18 @@ export default function TrendsPage({ state, endMonth, profileType = "personal" }
     .filter(({ currentAmount, previousAmount }) => currentAmount || previousAmount)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || b.currentAmount - a.currentAmount)
     .slice(0, 6);
+  const netWorthValues = netWorthHistory.map(({ value }) => value);
+  const netWorthMin = Math.min(...netWorthValues, 0);
+  const netWorthRange = Math.max(Math.max(...netWorthValues, 0) - netWorthMin, 1);
+  const downloadCsv = () => {
+    const csv = transactionsToCsv(state.transactions, state, profileType);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `cloud-transactions-${localDate()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
 
   return (
     <>
@@ -84,10 +99,13 @@ export default function TrendsPage({ state, endMonth, profileType = "personal" }
         title={business ? "Know what is moving the margin." : "See where your money is going."}
         description={business ? "Compare operating costs across months and isolate software, advertising, travel, payroll, and other business drivers." : "Compare months, spot changes, and separate everyday details such as dining out, groceries, and gas."}
         action={(
-          <div className="flex rounded-xl border border-black/8 bg-white p-1">
-            {[3, 6, 12].map((value) => (
-              <button key={value} onClick={() => setPeriod(value)} className={`interactive-button min-h-8 rounded-lg px-3 text-[11px] font-bold ${period === value ? "bg-forest-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{value} months</button>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            <div className="flex rounded-xl border border-black/8 bg-white p-1">
+              {[3, 6, 12].map((value) => (
+                <button key={value} onClick={() => setPeriod(value)} className={`interactive-button min-h-8 rounded-lg px-3 text-[11px] font-bold ${period === value ? "bg-forest-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{value} months</button>
+              ))}
+            </div>
+            <button onClick={downloadCsv} className="interactive-button flex min-h-10 items-center gap-2 rounded-xl border border-black/8 bg-white px-3 text-[11px] font-bold text-slate-600 hover:bg-slate-50"><Download className="size-4" /> Export CSV</button>
           </div>
         )}
       />
@@ -199,6 +217,18 @@ export default function TrendsPage({ state, endMonth, profileType = "personal" }
           )}
         </Card>
       </div>
+
+      <Card className="mt-5 overflow-hidden">
+        <div className="border-b border-black/5 p-5 sm:p-6"><p className="eyebrow">Net worth history</p><h2 className="mt-1 text-lg font-semibold tracking-[-0.025em]">Assets minus what you owe</h2><p className="mt-1 text-xs text-slate-500">A twelve-month view based on the account activity recorded in Cloud.</p></div>
+        <div className="overflow-x-auto px-4 pb-5 pt-7 sm:px-6">
+          <div className="grid h-52 items-end gap-2" style={{ gridTemplateColumns: "repeat(12, minmax(48px, 1fr))", minWidth: 680 }} role="img" aria-label="Net worth over twelve months">
+            {netWorthHistory.map((item) => {
+              const height = Math.max(((item.value - netWorthMin) / netWorthRange) * 130, 5);
+              return <div key={item.month} className="flex h-full flex-col justify-end text-center" title={`${item.label}: ${formatMoney(item.value, state.currency)}`}><span className="mb-2 truncate text-[9px] font-semibold text-slate-400">{formatMoney(item.value, state.currency, { whole: true })}</span><span className={`mx-auto block w-full max-w-10 rounded-t-lg ${item.value >= 0 ? "bg-emerald-500/75" : "bg-rose-400/75"}`} style={{ height }} /><span className="mt-2 border-t border-black/5 pt-2 text-[9px] font-bold text-slate-500">{item.label}</span></div>;
+            })}
+          </div>
+        </div>
+      </Card>
     </>
   );
 }

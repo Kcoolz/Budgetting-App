@@ -3,8 +3,8 @@ import { Link } from "react-router";
 import { EXPENSE_CATEGORIES, formatMoney, sum } from "../lib/budget";
 import Card from "./ui/Card";
 
-export default function BudgetHealthCard({ budgets, spending, currency }) {
-  const rows = EXPENSE_CATEGORIES
+export default function BudgetHealthCard({ budgets, spending, currency, categories = EXPENSE_CATEGORIES }) {
+  const rows = categories
     .map((category) => {
       const budget = Number(budgets[category.id]) || 0;
       const spent = Number(spending[category.id]) || 0;

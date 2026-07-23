@@ -1,4 +1,4 @@
-name: Deploy Sprout Budget to GitHub Pages
+name: Test and deploy Cloud Budget
 
 on:
   push:
@@ -32,6 +32,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run tests
+        run: npm test
 
       - name: Build site
         run: npm run build

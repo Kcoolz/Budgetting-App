@@ -8,7 +8,7 @@ const fixedCategoryIds = ["housing", "bills"];
 export default function BillsFocusCard({ bills, budgets, spending, currency, profileType = "personal" }) {
   const business = profileType === "business";
   const categories = expenseCategoriesFor(profileType);
-  const activeBills = bills.filter((bill) => bill.active !== false);
+  const activeBills = bills.filter((bill) => bill.active !== false && bill.type !== "income");
   const monthlyScheduled = sum(activeBills.map(monthlyRecurringAmount));
   const fixedBudget = sum(fixedCategoryIds.map((id) => budgets[id]));
   const fixedSpent = sum(fixedCategoryIds.map((id) => spending[id]));

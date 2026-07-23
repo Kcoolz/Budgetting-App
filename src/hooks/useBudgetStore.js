@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { createInitialState, guessSubcategory, localDate, normalizeDashboard, normalizeState } from "../lib/budget";
 import { getAccountBalances } from "../lib/accounts";
-import { useCloudSync } from "../lib/cloudSync";
+import { applyTransactionRules } from "../lib/planning";
 import { createProfileRecord, normalizeProfileStore } from "../lib/profiles";
-import { useAuth } from "../components/AuthGate";
 
 const STORAGE_KEY = "cloud-budget-v1";
 const LEGACY_STORAGE_KEY = "sprout-budget-v1";
@@ -22,16 +21,32 @@ function loadProfileState() {
 }
 
 export function useBudgetStore() {
-  const { user } = useAuth();
   const [profileState, setProfileState] = useState(loadProfileState);
+  const [storageError, setStorageError] = useState("");
   const activeProfile = profileState.profiles.find(({ id }) => id === profileState.activeProfileId) ?? profileState.profiles[0];
   const state = activeProfile.budget;
 
   useEffect(() => {
-    localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profileState));
+    try {
+      localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profileState));
+      setStorageError("");
+    } catch {
+      setStorageError("Cloud could not save to this browser. Export a backup now; recent changes may exist only until this tab closes.");
+    }
   }, [profileState]);
 
-  const syncStatus = useCloudSync({ user, profileState, setProfileState });
+  useEffect(() => {
+    const synchronizeTabs = (event) => {
+      if (event.key !== PROFILES_STORAGE_KEY || !event.newValue) return;
+      try {
+        setProfileState(normalizeProfileStore(JSON.parse(event.newValue)));
+      } catch {
+        setStorageError("Another tab changed Cloud data, but this tab could not read the update. Export a backup before continuing.");
+      }
+    };
+    window.addEventListener("storage", synchronizeTabs);
+    return () => window.removeEventListener("storage", synchronizeTabs);
+  }, []);
 
   const setState = (updater) => {
     setProfileState((current) => ({
@@ -46,12 +61,15 @@ export function useBudgetStore() {
     setState((current) => {
       const transactionId = createId();
       const { recurrence, ...transactionData } = transaction;
+      const ruledTransaction = applyTransactionRules(transactionData, current.rules);
       const recurringBill = recurrence
         ? {
             id: createId(),
-            description: transaction.description,
-            amount: Number(transaction.amount),
-            category: transaction.category,
+            type: transaction.type === "income" ? "income" : "expense",
+            description: ruledTransaction.description,
+            amount: Number(ruledTransaction.amount),
+            category: ruledTransaction.category,
+            accountId: ruledTransaction.accountId,
             frequency: recurrence,
             startDate: transaction.date,
             active: true
@@ -63,12 +81,13 @@ export function useBudgetStore() {
         transactions: [
           ...current.transactions,
           {
-            ...transactionData,
+            ...ruledTransaction,
             id: transactionId,
-            accountId: current.accounts.some(({ id }) => id === transactionData.accountId)
-              ? transactionData.accountId
+            accountId: current.accounts.some(({ id }) => id === ruledTransaction.accountId)
+              ? ruledTransaction.accountId
               : current.accounts[0].id,
             reviewed: false,
+            cleared: transactionData.cleared !== false,
             recurringId: recurringBill?.id ?? null
           }
         ],
@@ -84,11 +103,50 @@ export function useBudgetStore() {
     }));
   };
 
-  const updateBudget = ({ currency, budgets, rolloverEnabled, rolloverStartMonth }) => {
+  const updateTransaction = (transaction) => {
+    setState((current) => ({
+      ...current,
+      transactions: current.transactions.map((item) => item.id === transaction.id
+        ? {
+            ...item,
+            ...applyTransactionRules(transaction, current.rules),
+            amount: Number(transaction.amount),
+            accountId: current.accounts.some(({ id }) => id === transaction.accountId)
+              ? transaction.accountId
+              : current.accounts[0].id,
+            description: transaction.description.trim()
+          }
+        : item)
+    }));
+  };
+
+  const importTransactions = (transactions) => {
+    setState((current) => ({
+      ...current,
+      transactions: [
+        ...current.transactions,
+        ...transactions.map((transaction) => ({
+          ...applyTransactionRules(transaction, current.rules),
+          id: createId(),
+          amount: Number(transaction.amount),
+          accountId: current.accounts.some(({ id }) => id === transaction.accountId)
+            ? transaction.accountId
+            : current.accounts[0].id,
+          reviewed: false,
+          cleared: transaction.cleared !== false
+        }))
+      ]
+    }));
+  };
+
+  const updateBudget = ({ currency, budgets, rolloverEnabled, rolloverStartMonth }, month) => {
     setState((current) => normalizeState({
       ...current,
       currency,
-      budgets,
+      monthlyBudgets: {
+        ...current.monthlyBudgets,
+        [month]: budgets
+      },
       rollover: {
         enabled: rolloverEnabled,
         startMonth: rolloverEnabled
@@ -125,11 +183,17 @@ export function useBudgetStore() {
     });
   };
 
-  const addTransfer = (transfer) => {
-    setState((current) => normalizeState({
-      ...current,
-      transfers: [...current.transfers, { ...transfer, id: createId(), amount: Number(transfer.amount) }]
-    }, activeProfile.type));
+  const saveTransfer = (transfer) => {
+    setState((current) => {
+      const savedTransfer = { ...transfer, id: transfer.id ?? createId(), amount: Number(transfer.amount) };
+      const exists = current.transfers.some(({ id }) => id === savedTransfer.id);
+      return normalizeState({
+        ...current,
+        transfers: exists
+          ? current.transfers.map((item) => item.id === savedTransfer.id ? savedTransfer : item)
+          : [...current.transfers, savedTransfer]
+      }, activeProfile.type);
+    });
   };
 
   const deleteTransfer = (id) => {
@@ -168,10 +232,189 @@ export function useBudgetStore() {
     }));
   };
 
-  const addRecurringBill = (bill) => {
+  const saveRecurringBill = (bill) => {
+    setState((current) => {
+      const savedBill = {
+        ...bill,
+        id: bill.id ?? createId(),
+        type: bill.type === "income" ? "income" : "expense",
+        amount: Number(bill.amount),
+        accountId: current.accounts.some(({ id }) => id === bill.accountId) ? bill.accountId : current.accounts[0].id,
+        endDate: bill.endDate || null,
+        active: bill.active !== false
+      };
+      const exists = current.recurringBills.some(({ id }) => id === savedBill.id);
+      return {
+        ...current,
+        recurringBills: exists
+          ? current.recurringBills.map((item) => item.id === savedBill.id ? savedBill : item)
+          : [...current.recurringBills, savedBill]
+      };
+    });
+  };
+
+  const saveCustomCategory = (category) => {
+    setState((current) => {
+      const saved = {
+        ...category,
+        id: category.id ?? uniqueSlug(category.name, current.customCategories.map(({ id }) => id)),
+        name: category.name.trim(),
+        shortName: (category.shortName || category.name).trim(),
+        color: category.color || "#64748b",
+        archived: category.archived === true
+      };
+      const exists = current.customCategories.some(({ id }) => id === saved.id);
+      return normalizeState({
+        ...current,
+        customCategories: exists
+          ? current.customCategories.map((item) => item.id === saved.id ? saved : item)
+          : [...current.customCategories, saved]
+      }, activeProfile.type);
+    });
+  };
+
+  const toggleCustomCategory = (id) => {
+    setState((current) => normalizeState({
+      ...current,
+      customCategories: current.customCategories.map((category) => category.id === id
+        ? { ...category, archived: category.archived !== true }
+        : category)
+    }, activeProfile.type));
+  };
+
+  const saveCustomSubcategory = (subcategory) => {
+    setState((current) => {
+      const saved = {
+        ...subcategory,
+        id: subcategory.id ?? uniqueSlug(subcategory.name, current.customSubcategories.map(({ id }) => id)),
+        name: subcategory.name.trim(),
+        archived: false
+      };
+      const exists = current.customSubcategories.some(({ id }) => id === saved.id);
+      return normalizeState({
+        ...current,
+        customSubcategories: exists
+          ? current.customSubcategories.map((item) => item.id === saved.id ? saved : item)
+          : [...current.customSubcategories, saved]
+      }, activeProfile.type);
+    });
+  };
+
+  const saveTag = (tag) => {
+    setState((current) => {
+      const saved = { ...tag, id: tag.id ?? uniqueSlug(tag.name, current.tags.map(({ id }) => id)), name: tag.name.trim() };
+      const exists = current.tags.some(({ id }) => id === saved.id);
+      return normalizeState({
+        ...current,
+        tags: exists ? current.tags.map((item) => item.id === saved.id ? saved : item) : [...current.tags, saved]
+      }, activeProfile.type);
+    });
+  };
+
+  const deleteTag = (id) => {
     setState((current) => ({
       ...current,
-      recurringBills: [...current.recurringBills, { ...bill, id: createId(), active: true }]
+      tags: current.tags.filter((tag) => tag.id !== id),
+      transactions: current.transactions.map((transaction) => ({ ...transaction, tags: (transaction.tags ?? []).filter((tagId) => tagId !== id) })),
+      rules: current.rules.map((rule) => ({ ...rule, tags: (rule.tags ?? []).filter((tagId) => tagId !== id) }))
+    }));
+  };
+
+  const saveRule = (rule) => {
+    setState((current) => {
+      const saved = { ...rule, id: rule.id ?? createId(), active: rule.active !== false };
+      const exists = current.rules.some(({ id }) => id === saved.id);
+      return normalizeState({
+        ...current,
+        rules: exists ? current.rules.map((item) => item.id === saved.id ? saved : item) : [...current.rules, saved]
+      }, activeProfile.type);
+    });
+  };
+
+  const toggleRule = (id) => {
+    setState((current) => ({ ...current, rules: current.rules.map((rule) => rule.id === id ? { ...rule, active: rule.active === false } : rule) }));
+  };
+
+  const deleteRule = (id) => {
+    setState((current) => ({ ...current, rules: current.rules.filter((rule) => rule.id !== id) }));
+  };
+
+  const updateScheduleOccurrence = (occurrence, status) => {
+    setState((current) => {
+      if (status === "skipped") {
+        return {
+          ...current,
+          scheduleStatuses: {
+            ...current.scheduleStatuses,
+            [occurrence.occurrenceId]: { status: "skipped", transactionId: null, completedAt: localDate() }
+          }
+        };
+      }
+      const transactionId = createId();
+      const transaction = {
+        id: transactionId,
+        type: occurrence.type === "income" ? "income" : "expense",
+        amount: Number(occurrence.amount),
+        date: occurrence.dueDate,
+        description: occurrence.description,
+        category: occurrence.category,
+        accountId: current.accounts.some(({ id }) => id === occurrence.accountId) ? occurrence.accountId : current.accounts[0].id,
+        reviewed: true,
+        cleared: true,
+        recurringId: occurrence.id,
+        recurringOccurrenceId: occurrence.occurrenceId,
+        tags: [],
+        notes: ""
+      };
+      return {
+        ...current,
+        transactions: [...current.transactions, applyTransactionRules(transaction, current.rules)],
+        scheduleStatuses: {
+          ...current.scheduleStatuses,
+          [occurrence.occurrenceId]: {
+            status: transaction.type === "income" ? "received" : "paid",
+            transactionId,
+            completedAt: localDate()
+          }
+        }
+      };
+    });
+  };
+
+  const saveReconciliation = (snapshot, addAdjustment = false) => {
+    setState((current) => {
+      const reconciliation = { ...snapshot, id: createId() };
+      const difference = Number(snapshot.difference);
+      const adjustment = addAdjustment && Math.abs(difference) >= 0.005
+        ? {
+            id: createId(),
+            accountId: snapshot.accountId,
+            type: difference > 0 ? "income" : "expense",
+            amount: Math.abs(difference),
+            date: snapshot.date,
+            category: difference > 0 ? "other-income" : "other",
+            description: "Balance adjustment",
+            notes: "Created during account reconciliation.",
+            tags: [],
+            reviewed: true,
+            cleared: true,
+            excludeFromBudget: true
+          }
+        : null;
+      return {
+        ...current,
+        reconciliations: [...current.reconciliations, reconciliation],
+        transactions: adjustment ? [...current.transactions, adjustment] : current.transactions
+      };
+    });
+  };
+
+  const toggleRecurringBill = (id) => {
+    setState((current) => ({
+      ...current,
+      recurringBills: current.recurringBills.map((bill) =>
+        bill.id === id ? { ...bill, active: bill.active === false } : bill
+      )
     }));
   };
 
@@ -220,6 +463,15 @@ export function useBudgetStore() {
     }));
   };
 
+  const removeGoalContribution = (goalId, contributionId) => {
+    setState((current) => ({
+      ...current,
+      goals: current.goals.map((goal) => goal.id === goalId
+        ? { ...goal, contributions: goal.contributions.filter((contribution) => contribution.id !== contributionId) }
+        : goal)
+    }));
+  };
+
   const updateDashboard = (dashboard) => {
     setState((current) => ({ ...current, dashboard: normalizeDashboard(dashboard) }));
   };
@@ -235,7 +487,7 @@ export function useBudgetStore() {
               ...account,
               name: debt.name,
               type: "credit",
-              openingBalance: Number(account.openingBalance) + (-desiredBalance - (getAccountBalances(current)[accountId] ?? 0))
+              openingBalance: Number(account.openingBalance) + (-desiredBalance - (getAccountBalances(current, localDate())[accountId] ?? 0))
             }
           : account)
         : [...current.accounts, { id: accountId, name: debt.name, type: "credit", openingBalance: -desiredBalance }];
@@ -260,6 +512,7 @@ export function useBudgetStore() {
   };
 
   const importState = (value) => setState(normalizeState(value, activeProfile.type));
+  const importProfileStore = (value) => setProfileState(normalizeProfileStore(value));
 
   const switchProfile = (id) => {
     setProfileState((current) => current.profiles.some((profile) => profile.id === id)
@@ -307,36 +560,64 @@ export function useBudgetStore() {
 
   return {
     state,
+    profileBackup: profileState,
+    storageError,
     profiles: profileState.profiles,
     activeProfile,
-    syncStatus,
     switchProfile,
     createProfile,
     updateProfile,
     deleteProfile,
     addTransaction,
+    updateTransaction,
+    importTransactions,
     deleteTransaction,
     reviewTransaction,
     updateTransactionCategory,
     updateTransactionSubcategory,
+    saveCustomCategory,
+    toggleCustomCategory,
+    saveCustomSubcategory,
+    saveTag,
+    deleteTag,
+    saveRule,
+    toggleRule,
+    deleteRule,
     saveAccount,
     deleteAccount,
-    addTransfer,
+    saveTransfer,
     deleteTransfer,
-    addRecurringBill,
+    saveRecurringBill,
+    toggleRecurringBill,
     deleteRecurringBill,
+    updateScheduleOccurrence,
+    saveReconciliation,
     saveGoal,
     deleteGoal,
     assignToGoal,
+    removeGoalContribution,
     updateDashboard,
     saveDebt,
     deleteDebt,
     updateDebtPlan,
     updateBudget,
-    importState
+    importState,
+    importProfileStore
   };
 }
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function uniqueSlug(name, existingIds = []) {
+  const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "custom";
+  const used = new Set(existingIds);
+  let candidate = `custom-${base}`;
+  let index = 2;
+  while (used.has(candidate)) {
+    candidate = `custom-${base}-${index}`;
+    index += 1;
+  }
+  return candidate;
 }

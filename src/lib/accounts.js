@@ -45,7 +45,7 @@ export function normalizeTransfers(value, accounts) {
       accountIds.has(transfer.fromAccountId) &&
       accountIds.has(transfer.toAccountId) &&
       transfer.fromAccountId !== transfer.toAccountId &&
-      /^\d{4}-\d{2}-\d{2}$/.test(transfer.date ?? "") &&
+      isValidDateString(transfer.date) &&
       Number.isFinite(Number(transfer.amount)) &&
       Number(transfer.amount) > 0
   )).map((transfer) => ({
@@ -68,13 +68,15 @@ export function isLiabilityAccount(account) {
   return getAccountType(account?.type).group === "liability";
 }
 
-export function getAccountBalances(state) {
+export function getAccountBalances(state, throughDate = null, clearedOnly = false) {
   const balances = Object.fromEntries(
     (state.accounts ?? []).map((account) => [account.id, Number(account.openingBalance) || 0])
   );
 
   for (const transaction of state.transactions ?? []) {
     if (!(transaction.accountId in balances)) continue;
+    if (throughDate && transaction.date > throughDate) continue;
+    if (clearedOnly && transaction.cleared === false) continue;
     balances[transaction.accountId] += transaction.type === "income"
       ? Number(transaction.amount) || 0
       : -(Number(transaction.amount) || 0);
@@ -82,6 +84,7 @@ export function getAccountBalances(state) {
 
   for (const transfer of state.transfers ?? []) {
     if (!(transfer.fromAccountId in balances) || !(transfer.toAccountId in balances)) continue;
+    if (throughDate && transfer.date > throughDate) continue;
     balances[transfer.fromAccountId] -= Number(transfer.amount) || 0;
     balances[transfer.toAccountId] += Number(transfer.amount) || 0;
   }
@@ -89,8 +92,8 @@ export function getAccountBalances(state) {
   return balances;
 }
 
-export function getAccountOverview(state) {
-  const balances = getAccountBalances(state);
+export function getAccountOverview(state, throughDate = null) {
+  const balances = getAccountBalances(state, throughDate);
   let assets = 0;
   let liabilities = 0;
 
@@ -110,8 +113,8 @@ export function accountHasActivity(state, accountId) {
     (state.debts ?? []).some((debt) => debt.accountId === accountId);
 }
 
-export function getLinkedDebts(state) {
-  const balances = getAccountBalances(state);
+export function getLinkedDebts(state, throughDate = null) {
+  const balances = getAccountBalances(state, throughDate);
   return (state.debts ?? []).map((debt) => {
     const account = (state.accounts ?? []).find(({ id }) => id === debt.accountId);
     if (!account) return debt;
@@ -121,4 +124,11 @@ export function getLinkedDebts(state) {
       balance: Math.max(-(balances[account.id] ?? 0), 0)
     };
   });
+}
+
+function isValidDateString(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? "")) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }

@@ -54,11 +54,12 @@ export default function SummaryCards({ summary, comparison, safeToSpend, currenc
 
       <Card as="article" className="summary-budget relative min-h-44 overflow-hidden border-transparent px-5 py-5 text-white shadow-[0_14px_35px_rgba(18,58,99,0.22)]">
         <span className="absolute -bottom-16 -right-12 size-40 rounded-full border border-white/10 bg-white/[0.04]" aria-hidden="true" />
-        <MetricLabel icon={Gauge} tone="budget">Budget left</MetricLabel>
-        <Value danger={summary.budgetRemaining < 0} inverse>{money(summary.budgetRemaining)}</Value>
+        <MetricLabel icon={Gauge} tone="budget">Available to spend</MetricLabel>
+        <Value danger={summary.spendableRemaining < 0} inverse>{money(summary.spendableRemaining)}</Value>
         <p className="mt-2 text-[11px] font-medium text-blue-100/70">
           {safeToSpend.label ?? `${safeDisplay} safe to spend per day`}
         </p>
+        {summary.totalBudget > 0 && <p className="mt-1 text-[10px] text-blue-100/70">{money(summary.budgetRemaining)} left across category limits</p>}
         {summary.goalReserved > 0 && (
           <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-blue-100"><LockKeyhole className="size-3" />{money(summary.goalReserved)} reserved for goals</p>
         )}

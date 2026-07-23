@@ -3,7 +3,7 @@ import { dateForMonth, formatMoney } from "../lib/budget";
 import Button from "./ui/Button";
 import ModalShell from "./ui/ModalShell";
 
-export default function TransferModal({ open, accounts, balances, currency, selectedMonth, onClose, onSave }) {
+export default function TransferModal({ open, transfer, accounts, balances, currency, selectedMonth, onClose, onSave }) {
   const [fromAccountId, setFromAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [amount, setAmount] = useState("");
@@ -12,18 +12,19 @@ export default function TransferModal({ open, accounts, balances, currency, sele
 
   useEffect(() => {
     if (!open) return;
-    setFromAccountId(accounts[0]?.id ?? "");
-    setToAccountId(accounts[1]?.id ?? "");
-    setAmount("");
-    setDate(dateForMonth(selectedMonth));
-    setDescription("");
-  }, [open, accounts, selectedMonth]);
+    setFromAccountId(transfer?.fromAccountId ?? accounts[0]?.id ?? "");
+    setToAccountId(transfer?.toAccountId ?? accounts[1]?.id ?? "");
+    setAmount(transfer?.amount ?? "");
+    setDate(transfer?.date ?? dateForMonth(selectedMonth));
+    setDescription(transfer?.description === "Transfer" ? "" : transfer?.description ?? "");
+  }, [open, transfer, accounts, selectedMonth]);
 
   const submit = (event) => {
     event.preventDefault();
     const numericAmount = Number(amount);
     if (!fromAccountId || !toAccountId || fromAccountId === toAccountId || !Number.isFinite(numericAmount) || numericAmount <= 0) return;
     onSave({
+      ...(transfer ? { id: transfer.id } : {}),
       fromAccountId,
       toAccountId,
       amount: numericAmount,
@@ -38,7 +39,7 @@ export default function TransferModal({ open, accounts, balances, currency, sele
   ));
 
   return (
-    <ModalShell open={open} onClose={onClose} eyebrow="Move money" title="Transfer between accounts">
+    <ModalShell open={open} onClose={onClose} eyebrow="Move money" title={transfer ? "Edit transfer" : "Transfer between accounts"}>
       <form onSubmit={submit} className="px-5 pb-6 pt-6 sm:px-7 sm:pb-7">
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-xs font-semibold text-slate-600">
@@ -75,7 +76,7 @@ export default function TransferModal({ open, accounts, balances, currency, sele
 
         <div className="mt-7 flex justify-end gap-2 border-t border-black/5 pt-5">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary">Save transfer</Button>
+          <Button type="submit" variant="primary">{transfer ? "Save changes" : "Save transfer"}</Button>
         </div>
       </form>
     </ModalShell>

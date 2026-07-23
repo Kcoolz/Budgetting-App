@@ -94,12 +94,16 @@ export const BUSINESS_INCOME_CATEGORIES = [
   { id: "other-income", name: "Other revenue" }
 ];
 
-export function expenseCategoriesFor(profileType = "personal") {
-  return profileType === "business" ? BUSINESS_EXPENSE_CATEGORIES : EXPENSE_CATEGORIES;
+export function expenseCategoriesFor(profileType = "personal", state = null) {
+  const defaults = profileType === "business" ? BUSINESS_EXPENSE_CATEGORIES : EXPENSE_CATEGORIES;
+  return [...defaults, ...(Array.isArray(state?.customCategories) ? state.customCategories : [])]
+    .filter((category) => category.archived !== true);
 }
 
-export function expenseSubcategoriesFor(profileType = "personal") {
-  return profileType === "business" ? BUSINESS_EXPENSE_SUBCATEGORIES : EXPENSE_SUBCATEGORIES;
+export function expenseSubcategoriesFor(profileType = "personal", state = null) {
+  const defaults = profileType === "business" ? BUSINESS_EXPENSE_SUBCATEGORIES : EXPENSE_SUBCATEGORIES;
+  return [...defaults, ...(Array.isArray(state?.customSubcategories) ? state.customSubcategories : [])]
+    .filter((subcategory) => subcategory.archived !== true);
 }
 
 export function incomeCategoriesFor(profileType = "personal") {
@@ -108,6 +112,7 @@ export function incomeCategoriesFor(profileType = "personal") {
 
 export const RECURRENCE_OPTIONS = [
   { id: "weekly", name: "Weekly" },
+  { id: "biweekly", name: "Every two weeks" },
   { id: "monthly", name: "Monthly" },
   { id: "yearly", name: "Yearly" }
 ];
@@ -141,10 +146,17 @@ export function normalizeDashboard(value) {
 
 export function createInitialState(profileType = "personal") {
   return {
-    version: 3,
+    version: 5,
     currency: "CAD",
     budgets: Object.fromEntries(EXPENSE_CATEGORIES.map(({ id }) => [id, 0])),
+    monthlyBudgets: {},
     rollover: { enabled: false, startMonth: null },
+    customCategories: [],
+    customSubcategories: [],
+    tags: [],
+    rules: [],
+    reconciliations: [],
+    scheduleStatuses: {},
     accounts: [createDefaultAccount(profileType)],
     transfers: [],
     transactions: [],
@@ -161,11 +173,22 @@ export function normalizeState(value, profileType = "personal") {
   if (!value || typeof value !== "object") return initial;
 
   const allowedCurrencies = new Set(["CAD", "USD", "EUR", "GBP", "AUD"]);
-  const budgets = { ...initial.budgets };
+  const customCategories = normalizeCustomCategories(value.customCategories);
+  const customSubcategories = normalizeCustomSubcategories(value.customSubcategories, customCategories);
+  const categoryIds = [...EXPENSE_CATEGORIES.map(({ id }) => id), ...customCategories.map(({ id }) => id)];
+  const budgets = Object.fromEntries(categoryIds.map((id) => [id, 0]));
 
-  for (const category of EXPENSE_CATEGORIES) {
-    const amount = Number(value.budgets?.[category.id]);
-    budgets[category.id] = Number.isFinite(amount) && amount >= 0 ? amount : 0;
+  for (const id of categoryIds) {
+    const amount = Number(value.budgets?.[id]);
+    budgets[id] = Number.isFinite(amount) && amount >= 0 ? amount : 0;
+  }
+
+  const monthlyBudgets = {};
+  if (value.monthlyBudgets && typeof value.monthlyBudgets === "object" && !Array.isArray(value.monthlyBudgets)) {
+    for (const [month, plan] of Object.entries(value.monthlyBudgets)) {
+      if (!isValidMonthString(month) || !plan || typeof plan !== "object") continue;
+      monthlyBudgets[month] = normalizeBudgetAmounts(plan, categoryIds);
+    }
   }
 
   const accounts = normalizeAccounts(value.accounts, profileType);
@@ -176,7 +199,11 @@ export function normalizeState(value, profileType = "personal") {
         ...transaction,
         amount: Number(transaction.amount),
         accountId: accounts.some(({ id }) => id === transaction.accountId) ? transaction.accountId : defaultAccountId,
-        reviewed: typeof transaction.reviewed === "boolean" ? transaction.reviewed : true
+        reviewed: typeof transaction.reviewed === "boolean" ? transaction.reviewed : true,
+        cleared: typeof transaction.cleared === "boolean" ? transaction.cleared : true,
+        notes: typeof transaction.notes === "string" ? transaction.notes.slice(0, 500) : "",
+        tags: normalizeStringIds(transaction.tags),
+        splits: normalizeTransactionSplits(transaction.splits, Number(transaction.amount))
       }))
     : [];
 
@@ -185,8 +212,11 @@ export function normalizeState(value, profileType = "personal") {
   const recurringBills = Array.isArray(value.recurringBills)
     ? value.recurringBills.filter(isValidRecurringBill).map((bill) => ({
         ...bill,
+        type: bill.type === "income" ? "income" : "expense",
         amount: Number(bill.amount),
-        active: bill.active !== false
+        active: bill.active !== false,
+        accountId: accounts.some(({ id }) => id === bill.accountId) ? bill.accountId : defaultAccountId,
+        endDate: normalizeOptionalDate(bill.endDate)
       }))
     : [];
 
@@ -228,17 +258,24 @@ export function normalizeState(value, profileType = "personal") {
     startMonth: value.rolloverStartMonth ?? null
   };
   const rolloverEnabled = rolloverValue?.enabled === true;
-  const rolloverStartMonth = /^\d{4}-\d{2}$/.test(rolloverValue?.startMonth ?? "")
+  const rolloverStartMonth = isValidMonthString(rolloverValue?.startMonth)
     ? rolloverValue.startMonth
     : rolloverEnabled
       ? localDate().slice(0, 7)
       : null;
 
   return {
-    version: 3,
+    version: 5,
     currency: allowedCurrencies.has(value.currency) ? value.currency : initial.currency,
     budgets,
+    monthlyBudgets,
     rollover: { enabled: rolloverEnabled, startMonth: rolloverStartMonth },
+    customCategories,
+    customSubcategories,
+    tags: normalizeTags(value.tags),
+    rules: normalizeRules(value.rules),
+    reconciliations: normalizeReconciliations(value.reconciliations, accounts),
+    scheduleStatuses: normalizeScheduleStatuses(value.scheduleStatuses),
     accounts,
     transfers,
     transactions,
@@ -250,13 +287,131 @@ export function normalizeState(value, profileType = "personal") {
   };
 }
 
+function normalizeCustomCategories(value) {
+  if (!Array.isArray(value)) return [];
+  const reserved = new Set(EXPENSE_CATEGORIES.map(({ id }) => id));
+  const seen = new Set();
+  return value.filter((category) => {
+    const id = typeof category?.id === "string" ? category.id.trim() : "";
+    if (!id || reserved.has(id) || seen.has(id) || typeof category.name !== "string" || !category.name.trim()) return false;
+    seen.add(id);
+    return true;
+  }).map((category) => ({
+    id: category.id.trim(),
+    name: category.name.trim().slice(0, 40),
+    shortName: String(category.shortName || category.name).trim().slice(0, 24),
+    color: /^#[0-9a-f]{6}$/i.test(category.color ?? "") ? category.color : "#64748b",
+    archived: category.archived === true
+  }));
+}
+
+function normalizeCustomSubcategories(value, customCategories) {
+  if (!Array.isArray(value)) return [];
+  const categoryIds = new Set([...EXPENSE_CATEGORIES.map(({ id }) => id), ...customCategories.map(({ id }) => id)]);
+  const reserved = new Set(ALL_EXPENSE_SUBCATEGORIES.map(({ id }) => id));
+  const seen = new Set();
+  return value.filter((subcategory) => {
+    const id = typeof subcategory?.id === "string" ? subcategory.id.trim() : "";
+    if (!id || reserved.has(id) || seen.has(id) || !categoryIds.has(subcategory?.category) || typeof subcategory.name !== "string" || !subcategory.name.trim()) return false;
+    seen.add(id);
+    return true;
+  }).map((subcategory) => ({
+    id: subcategory.id.trim(),
+    category: subcategory.category,
+    name: subcategory.name.trim().slice(0, 40),
+    archived: subcategory.archived === true
+  }));
+}
+
+function normalizeStringIds(value) {
+  return Array.isArray(value)
+    ? [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim().slice(0, 48)))]
+    : [];
+}
+
+function normalizeTags(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.filter((tag) => {
+    const id = typeof tag?.id === "string" ? tag.id.trim() : "";
+    if (!id || seen.has(id) || typeof tag.name !== "string" || !tag.name.trim()) return false;
+    seen.add(id);
+    return true;
+  }).map((tag) => ({ id: tag.id.trim(), name: tag.name.trim().slice(0, 32) }));
+}
+
+function normalizeRules(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((rule) => (
+    typeof rule?.id === "string" &&
+    typeof rule.match === "string" &&
+    rule.match.trim() &&
+    ["contains", "equals"].includes(rule.operator)
+  )).map((rule) => ({
+    id: rule.id,
+    name: String(rule.name || rule.match).trim().slice(0, 48),
+    match: rule.match.trim().slice(0, 80),
+    operator: rule.operator,
+    type: ["income", "expense"].includes(rule.type) ? rule.type : "any",
+    category: typeof rule.category === "string" ? rule.category : "",
+    subcategory: typeof rule.subcategory === "string" ? rule.subcategory : "",
+    rename: typeof rule.rename === "string" ? rule.rename.trim().slice(0, 80) : "",
+    tags: normalizeStringIds(rule.tags),
+    active: rule.active !== false
+  }));
+}
+
+function normalizeReconciliations(value, accounts) {
+  if (!Array.isArray(value)) return [];
+  const accountIds = new Set(accounts.map(({ id }) => id));
+  return value.filter((item) => (
+    typeof item?.id === "string" &&
+    accountIds.has(item.accountId) &&
+    isValidDateString(item.date) &&
+    Number.isFinite(Number(item.statementBalance))
+  )).map((item) => ({
+    id: item.id,
+    accountId: item.accountId,
+    date: item.date,
+    statementBalance: Number(item.statementBalance),
+    clearedBalance: Number(item.clearedBalance) || 0,
+    difference: Number(item.difference) || 0
+  }));
+}
+
+function normalizeScheduleStatuses(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => (
+    item && ["paid", "received", "skipped"].includes(item.status)
+  )).map(([id, item]) => [id, {
+    status: item.status,
+    transactionId: typeof item.transactionId === "string" ? item.transactionId : null,
+    completedAt: isValidDateString(item.completedAt) ? item.completedAt : null
+  }]));
+}
+
+function normalizeTransactionSplits(value, total) {
+  if (!Array.isArray(value) || value.length < 2) return [];
+  const splits = value.filter((split) => (
+    typeof split?.category === "string" &&
+    Number.isFinite(Number(split.amount)) &&
+    Number(split.amount) > 0
+  )).map((split) => ({
+    id: typeof split.id === "string" ? split.id : `${split.category}-${split.subcategory ?? ""}`,
+    category: split.category,
+    subcategory: typeof split.subcategory === "string" ? split.subcategory : "",
+    amount: Number(split.amount)
+  }));
+  const splitTotal = sum(splits.map(({ amount }) => amount));
+  return Math.abs(splitTotal - total) < 0.01 ? splits : [];
+}
+
 function isValidTransaction(transaction) {
   return Boolean(
     transaction &&
       typeof transaction.id === "string" &&
       ["income", "expense"].includes(transaction.type) &&
-      typeof transaction.date === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(transaction.date) &&
+      isValidDateString(transaction.date) &&
       typeof transaction.description === "string" &&
       typeof transaction.category === "string" &&
       Number.isFinite(Number(transaction.amount)) &&
@@ -271,7 +426,7 @@ function isValidRecurringBill(bill) {
       typeof bill.description === "string" &&
       typeof bill.category === "string" &&
       RECURRENCE_OPTIONS.some(({ id }) => id === bill.frequency) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(bill.startDate ?? "") &&
+      isValidDateString(bill.startDate) &&
       Number.isFinite(Number(bill.amount)) &&
       Number(bill.amount) > 0
   );
@@ -288,15 +443,14 @@ function isValidGoal(goal) {
 }
 
 function normalizeOptionalDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? "")) return null;
-  return Number.isNaN(new Date(`${value}T12:00:00`).getTime()) ? null : value;
+  return isValidDateString(value) ? value : null;
 }
 
 function isValidContribution(contribution) {
   return Boolean(
     contribution &&
       typeof contribution.id === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(contribution.date ?? "") &&
+      isValidDateString(contribution.date) &&
       Number.isFinite(Number(contribution.amount)) &&
       Number(contribution.amount) > 0
   );
@@ -321,6 +475,7 @@ function isValidDebt(debt) {
 export function monthlyRecurringAmount(bill) {
   const amount = Math.max(Number(bill?.amount) || 0, 0);
   if (bill?.frequency === "weekly") return amount * 52 / 12;
+  if (bill?.frequency === "biweekly") return amount * 26 / 12;
   if (bill?.frequency === "yearly") return amount / 12;
   return amount;
 }
@@ -398,13 +553,13 @@ export function calculateDebtPlan(debts, extraPayment = 0, strategy = "avalanche
 export function getMonthlySummary(state, month) {
   const daysInMonth = getDaysInMonth(month);
   const transactions = state.transactions
-    .filter((transaction) => transaction.date.startsWith(month))
+    .filter((transaction) => transaction.date.startsWith(month) && transaction.excludeFromBudget !== true)
     .sort((a, b) => b.date.localeCompare(a.date));
   const income = sum(transactions.filter(({ type }) => type === "income").map(({ amount }) => amount));
   const expenses = sum(transactions.filter(({ type }) => type === "expense").map(({ amount }) => amount));
   const { budgets: effectiveBudgets, carryovers } = getEffectiveBudgets(state, month);
   const totalBudget = sum(Object.values(effectiveBudgets));
-  const categorySpending = getCategorySpending(state.transactions, month);
+  const categorySpending = getCategorySpending(state.transactions, month, state);
   const dailySpending = Array.from({ length: daysInMonth }, () => 0);
 
   for (const transaction of transactions) {
@@ -419,7 +574,8 @@ export function getMonthlySummary(state, month) {
       .map(({ amount }) => amount)
   );
   const budgetRemaining = totalBudget - expenses;
-  const availableBeforeGoals = totalBudget > 0 ? budgetRemaining : income - expenses;
+  const incomeRemaining = income - expenses;
+  const availableBeforeGoals = totalBudget > 0 ? Math.min(budgetRemaining, incomeRemaining) : incomeRemaining;
 
   return {
     transactions,
@@ -428,6 +584,8 @@ export function getMonthlySummary(state, month) {
     net: income - expenses,
     totalBudget,
     budgetRemaining,
+    incomeRemaining,
+    unallocatedIncome: income - totalBudget,
     goalReserved,
     spendableRemaining: availableBeforeGoals - goalReserved,
     percentSpent: totalBudget > 0 ? (expenses / totalBudget) * 100 : 0,
@@ -440,10 +598,9 @@ export function getMonthlySummary(state, month) {
 }
 
 export function getEffectiveBudgets(state, month) {
-  const baseBudgets = Object.fromEntries(
-    EXPENSE_CATEGORIES.map(({ id }) => [id, Math.max(Number(state.budgets?.[id]) || 0, 0)])
-  );
-  const emptyCarryovers = Object.fromEntries(EXPENSE_CATEGORIES.map(({ id }) => [id, 0]));
+  const baseBudgets = getBaseBudgets(state, month);
+  const categoryIds = getBudgetCategoryIds(state);
+  const emptyCarryovers = Object.fromEntries(categoryIds.map((id) => [id, 0]));
   const rollover = state.rollover ?? {};
 
   if (!rollover.enabled || !rollover.startMonth || month <= rollover.startMonth) {
@@ -451,38 +608,67 @@ export function getEffectiveBudgets(state, month) {
   }
 
   let cursor = rollover.startMonth;
-  let effective = { ...baseBudgets };
+  let effective = { ...getBaseBudgets(state, cursor) };
   let iterations = 0;
 
   while (cursor < month && iterations < 240) {
-    const spending = getCategorySpending(state.transactions, cursor);
+    const spending = getCategorySpending(state.transactions, cursor, state);
     const carryovers = Object.fromEntries(
-      EXPENSE_CATEGORIES.map(({ id }) => [id, effective[id] - spending[id]])
+      categoryIds.map((id) => [id, (effective[id] ?? 0) - (spending[id] ?? 0)])
     );
+    const nextMonth = shiftMonth(cursor, 1);
+    const nextBaseBudgets = getBaseBudgets(state, nextMonth);
     effective = Object.fromEntries(
-      EXPENSE_CATEGORIES.map(({ id }) => [id, baseBudgets[id] + carryovers[id]])
+      categoryIds.map((id) => [id, (nextBaseBudgets[id] ?? 0) + (carryovers[id] ?? 0)])
     );
-    cursor = shiftMonth(cursor, 1);
+    cursor = nextMonth;
     iterations += 1;
   }
 
   return {
     budgets: effective,
     carryovers: Object.fromEntries(
-      EXPENSE_CATEGORIES.map(({ id }) => [id, effective[id] - baseBudgets[id]])
+      categoryIds.map((id) => [id, (effective[id] ?? 0) - (baseBudgets[id] ?? 0)])
     )
   };
 }
 
-function getCategorySpending(transactions, month) {
-  const spending = Object.fromEntries(EXPENSE_CATEGORIES.map(({ id }) => [id, 0]));
+export function getBaseBudgets(state, month) {
+  const categoryIds = getBudgetCategoryIds(state);
+  const monthlyBudgets = state?.monthlyBudgets && typeof state.monthlyBudgets === "object"
+    ? state.monthlyBudgets
+    : {};
+  const exact = monthlyBudgets[month];
+  if (exact) return normalizeBudgetAmounts(exact, categoryIds);
+
+  const inheritedMonth = Object.keys(monthlyBudgets)
+    .filter((candidate) => isValidMonthString(candidate) && candidate < month)
+    .sort()
+    .at(-1);
+  return normalizeBudgetAmounts(inheritedMonth ? monthlyBudgets[inheritedMonth] : state?.budgets, categoryIds);
+}
+
+function getBudgetCategoryIds(state) {
+  return [...new Set([
+    ...EXPENSE_CATEGORIES.map(({ id }) => id),
+    ...(state?.customCategories ?? []).map(({ id }) => id)
+  ])];
+}
+
+function normalizeBudgetAmounts(value, categoryIds = EXPENSE_CATEGORIES.map(({ id }) => id)) {
+  return Object.fromEntries(categoryIds.map((id) => {
+    const amount = Number(value?.[id]);
+    return [id, Number.isFinite(amount) && amount >= 0 ? amount : 0];
+  }));
+}
+
+function getCategorySpending(transactions, month, state = null) {
+  const spending = Object.fromEntries(getBudgetCategoryIds(state).map((id) => [id, 0]));
   for (const transaction of transactions) {
-    if (
-      transaction.type === "expense" &&
-      transaction.date.startsWith(month) &&
-      transaction.category in spending
-    ) {
-      spending[transaction.category] += Number(transaction.amount);
+    if (transaction.type !== "expense" || transaction.excludeFromBudget === true || !transaction.date.startsWith(month)) continue;
+    const parts = transaction.splits?.length ? transaction.splits : [transaction];
+    for (const part of parts) {
+      if (part.category in spending) spending[part.category] += Number(part.amount);
     }
   }
   return spending;
@@ -539,12 +725,17 @@ export function getUpcomingBills(recurringBills, referenceDate = new Date(), day
 
   for (const bill of recurringBills.filter((item) => item.active !== false)) {
     const start = parseLocalDate(bill.startDate);
-    if (bill.frequency === "weekly") {
+    const end = bill.endDate ? parseLocalDate(bill.endDate) : null;
+    const addOccurrence = (occurrence) => {
+      if (occurrence >= rangeStart && (!end || occurrence <= end)) occurrences.push(toOccurrence(bill, occurrence));
+    };
+    if (bill.frequency === "weekly" || bill.frequency === "biweekly") {
+      const intervalDays = bill.frequency === "biweekly" ? 14 : 7;
       const elapsedDays = Math.max(0, Math.ceil((rangeStart - start) / 86_400_000));
-      let occurrence = addDays(start, Math.ceil(elapsedDays / 7) * 7);
+      let occurrence = addDays(start, Math.ceil(elapsedDays / intervalDays) * intervalDays);
       while (occurrence <= rangeEnd) {
-        if (occurrence >= rangeStart) occurrences.push(toOccurrence(bill, occurrence));
-        occurrence = addDays(occurrence, 7);
+        addOccurrence(occurrence);
+        occurrence = addDays(occurrence, intervalDays);
       }
       continue;
     }
@@ -556,7 +747,7 @@ export function getUpcomingBills(recurringBills, referenceDate = new Date(), day
       let index = Math.max(0, monthDifference - 1);
       let occurrence = addMonthsAnchored(start, index);
       while (occurrence <= rangeEnd) {
-        if (occurrence >= rangeStart && occurrence >= start) occurrences.push(toOccurrence(bill, occurrence));
+        if (occurrence >= start) addOccurrence(occurrence);
         index += 1;
         occurrence = addMonthsAnchored(start, index);
       }
@@ -566,7 +757,7 @@ export function getUpcomingBills(recurringBills, referenceDate = new Date(), day
     let year = Math.max(start.getFullYear(), rangeStart.getFullYear() - 1);
     let occurrence = addYearsAnchored(start, year - start.getFullYear());
     while (occurrence <= rangeEnd) {
-      if (occurrence >= rangeStart && occurrence >= start) occurrences.push(toOccurrence(bill, occurrence));
+      if (occurrence >= start) addOccurrence(occurrence);
       year += 1;
       occurrence = addYearsAnchored(start, year - start.getFullYear());
     }
@@ -620,6 +811,7 @@ export function getSpendingComparison(state, month, referenceDate = new Date()) 
           (transaction) =>
             transaction.type === "expense" &&
             transaction.date.startsWith(targetMonth) &&
+            transaction.excludeFromBudget !== true &&
             Number(transaction.date.slice(8, 10)) <= day
         )
         .map(({ amount }) => amount)
@@ -766,8 +958,8 @@ export function guessSubcategory(description, category = guessCategory(descripti
   return matches[category]?.find(([pattern]) => pattern.test(value))?.[1] ?? fallback[category] ?? "other-detail";
 }
 
-export function getTransactionSubcategory(transaction, profileType = "personal") {
-  const explicit = expenseSubcategoriesFor(profileType).find(
+export function getTransactionSubcategory(transaction, profileType = "personal", state = null) {
+  const explicit = expenseSubcategoriesFor(profileType, state).find(
     ({ id, category }) => id === transaction?.subcategory && category === transaction?.category
   );
   return explicit?.id ?? guessSubcategory(transaction?.description ?? "", transaction?.category, profileType);
@@ -776,20 +968,24 @@ export function getTransactionSubcategory(transaction, profileType = "personal")
 export function getSpendingTrends(state, endMonth, monthCount = 6, profileType = "personal") {
   const count = Math.max(1, Math.min(Math.round(Number(monthCount) || 6), 24));
   const months = Array.from({ length: count }, (_, index) => shiftMonth(endMonth, index - count + 1));
-  const categories = expenseCategoriesFor(profileType);
-  const subcategories = expenseSubcategoriesFor(profileType);
+  const categories = expenseCategoriesFor(profileType, state);
+  const subcategories = expenseSubcategoriesFor(profileType, state);
 
   return months.map((month) => {
     const expenses = state.transactions.filter(
-      (transaction) => transaction.type === "expense" && transaction.date.startsWith(month)
+      (transaction) => transaction.type === "expense" && transaction.excludeFromBudget !== true && transaction.date.startsWith(month)
     );
     const byCategory = Object.fromEntries(categories.map(({ id }) => [id, 0]));
     const bySubcategory = Object.fromEntries(subcategories.map(({ id }) => [id, 0]));
 
     for (const transaction of expenses) {
-      const amount = Number(transaction.amount) || 0;
-      if (transaction.category in byCategory) byCategory[transaction.category] += amount;
-      bySubcategory[getTransactionSubcategory(transaction, profileType)] += amount;
+      const parts = transaction.splits?.length ? transaction.splits : [transaction];
+      for (const part of parts) {
+        const amount = Number(part.amount) || 0;
+        if (part.category in byCategory) byCategory[part.category] += amount;
+        const detail = getTransactionSubcategory(part, profileType, state);
+        if (detail in bySubcategory) bySubcategory[detail] += amount;
+      }
     }
 
     return {
@@ -822,13 +1018,14 @@ export function formatMoney(amount, currency, options = {}) {
   }).format(amount);
 }
 
-export function categoryName(id, type = "expense", profileType = "personal") {
-  const categories = type === "income" ? incomeCategoriesFor(profileType) : expenseCategoriesFor(profileType);
+export function categoryName(id, type = "expense", profileType = "personal", state = null) {
+  const categories = type === "income" ? incomeCategoriesFor(profileType) : expenseCategoriesFor(profileType, state);
   return categories.find((category) => category.id === id)?.name ?? "Other";
 }
 
-export function subcategoryName(id) {
-  return ALL_EXPENSE_SUBCATEGORIES.find((subcategory) => subcategory.id === id)?.name ?? "Other";
+export function subcategoryName(id, state = null) {
+  return [...ALL_EXPENSE_SUBCATEGORIES, ...(state?.customSubcategories ?? [])]
+    .find((subcategory) => subcategory.id === id)?.name ?? "Other";
 }
 
 export function getDaysInMonth(month) {
@@ -850,4 +1047,17 @@ export function localDate(date = new Date()) {
 export function dateForMonth(month, referenceDate = new Date()) {
   const current = localDate(referenceDate);
   return current.startsWith(month) ? current : `${month}-01`;
+}
+
+export function isValidDateString(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value ?? "")) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+export function isValidMonthString(value) {
+  if (!/^\d{4}-\d{2}$/.test(value ?? "")) return false;
+  const [year, month] = value.split("-").map(Number);
+  return year >= 1 && month >= 1 && month <= 12;
 }

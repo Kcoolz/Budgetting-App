@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CalendarCheck2, CalendarDays, ChevronLeft, ChevronRight, ReceiptText, ShieldAlert } from "lucide-react";
+import { Banknote, CalendarCheck2, CalendarDays, ChevronLeft, ChevronRight, ReceiptText, ShieldAlert } from "lucide-react";
 import { formatMoney, getUpcomingBills, localDate, shiftMonth, sum } from "../lib/budget";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
@@ -21,12 +21,14 @@ function monthGrid(month) {
 function eventClasses(type) {
   if (type === "plan") return "bg-blue-50 text-blue-800 hover:bg-blue-100";
   if (type === "deadline") return "bg-rose-50 text-rose-800 hover:bg-rose-100";
+  if (type === "income") return "bg-emerald-50 text-emerald-800";
   return "bg-orange-50 text-orange-800";
 }
 
 function EventIcon({ type }) {
   if (type === "plan") return <CalendarCheck2 className="size-3 shrink-0" />;
   if (type === "deadline") return <ShieldAlert className="size-3 shrink-0" />;
+  if (type === "income") return <Banknote className="size-3 shrink-0" />;
   return <ReceiptText className="size-3 shrink-0" />;
 }
 
@@ -43,7 +45,7 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
     const billEvents = billOccurrences.map((bill) => ({
       id: bill.occurrenceId,
       date: bill.dueDate,
-      type: "bill",
+      type: bill.type === "income" ? "income" : "bill",
       label: bill.description,
       amount: bill.amount,
       bill
@@ -61,6 +63,7 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
   }, {}), [events]);
   const monthEvents = events.filter((event) => event.date.startsWith(calendarMonth));
   const monthBills = monthEvents.filter(({ type }) => type === "bill");
+  const monthIncome = monthEvents.filter(({ type }) => type === "income");
   const goalMilestones = monthEvents.filter(({ type }) => type !== "bill");
   const selectedEvents = eventsByDate[selectedDate] ?? [];
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(`${calendarMonth}-01T12:00:00`));
@@ -94,11 +97,13 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
         </div>
       </div>
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-3">
+      <div className="mt-5 grid gap-2 sm:grid-cols-4">
         <div className="rounded-xl bg-orange-50 px-3 py-2.5"><span className="text-[9px] font-bold uppercase tracking-wider text-orange-700">Bills this month</span><strong className="mt-1 block text-sm">{formatMoney(sum(monthBills.map(({ amount }) => amount)), currency)}</strong></div>
+        <div className="rounded-xl bg-emerald-50 px-3 py-2.5"><span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700">Income scheduled</span><strong className="mt-1 block text-sm">{formatMoney(sum(monthIncome.map(({ amount }) => amount)), currency)}</strong></div>
         <div className="rounded-xl bg-blue-50 px-3 py-2.5"><span className="text-[9px] font-bold uppercase tracking-wider text-blue-700">{business ? "Reserve milestones" : "Goal milestones"}</span><strong className="mt-1 block text-sm">{goalMilestones.length} {goalMilestones.length === 1 ? "date" : "dates"}</strong></div>
         <div className="flex items-center gap-4 rounded-xl bg-slate-50 px-3 py-2.5 text-[9px] font-semibold text-slate-500">
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-orange-400" /> Bill</span>
+          <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-emerald-500" /> Income</span>
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-blue-500" /> Plan</span>
           <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-rose-500" /> Must</span>
         </div>
@@ -118,7 +123,7 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
               <div key={key} className={`relative min-h-16 border-b border-r border-black/5 p-1 sm:min-h-28 sm:p-2 ${inMonth ? "bg-white" : "bg-slate-50/55"} ${selected ? "ring-2 ring-inset ring-forest-700/25" : ""}`} role="gridcell">
                 <button onClick={() => setSelectedDate(key)} className={`grid size-7 place-items-center rounded-lg text-[11px] font-semibold sm:size-8 sm:text-xs ${key === today ? "bg-forest-900 text-white" : inMonth ? "text-ink-900 hover:bg-forest-50" : "text-slate-300 hover:bg-slate-100"}`} aria-label={`Select ${key}`}>{date.getDate()}</button>
                 <div className="mt-1 hidden gap-1 sm:grid">
-                  {dayEvents.slice(0, 3).map((event) => event.type === "bill" ? (
+                  {dayEvents.slice(0, 3).map((event) => ["bill", "income"].includes(event.type) ? (
                     <div key={event.id} className={`flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold ${eventClasses(event.type)}`} title={`${event.label} ${formatMoney(event.amount, currency)}`}><EventIcon type={event.type} /><span className="truncate">{event.label}</span></div>
                   ) : (
                     <button key={event.id} onClick={() => onEditGoal(event.goal)} className={`interactive-button flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-left text-[9px] font-semibold ${eventClasses(event.type)}`} title={`${event.type === "plan" ? "Planned" : "Must-have"}: ${event.label}`}><EventIcon type={event.type} /><span className="truncate">{event.type === "plan" ? "Plan" : "Must"}: {event.label}</span></button>
@@ -126,7 +131,7 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
                   {dayEvents.length > 3 && <span className="px-1 text-[8px] font-bold text-slate-400">+{dayEvents.length - 3} more</span>}
                 </div>
                 <div className="absolute bottom-1 left-1 right-1 flex flex-wrap gap-0.5 sm:hidden" aria-hidden="true">
-                  {dayEvents.slice(0, 5).map((event) => <span key={event.id} className={`size-1.5 rounded-full ${event.type === "bill" ? "bg-orange-400" : event.type === "plan" ? "bg-blue-500" : "bg-rose-500"}`} />)}
+                  {dayEvents.slice(0, 5).map((event) => <span key={event.id} className={`size-1.5 rounded-full ${event.type === "bill" ? "bg-orange-400" : event.type === "income" ? "bg-emerald-500" : event.type === "plan" ? "bg-blue-500" : "bg-rose-500"}`} />)}
                 </div>
               </div>
             );
@@ -137,7 +142,7 @@ export default function PlanningCalendar({ bills, goals, currency, onEditGoal, p
       <div className="mt-4 sm:hidden">
         <div className="mb-2 flex items-center gap-2"><CalendarDays className="size-4 text-forest-700" /><strong className="text-xs">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date(`${selectedDate}T12:00:00`))}</strong></div>
         {selectedEvents.length ? <div className="grid gap-2">{selectedEvents.map((event) => (
-          <button key={event.id} onClick={() => event.goal && onEditGoal(event.goal)} disabled={!event.goal} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold ${eventClasses(event.type)}`}><EventIcon type={event.type} /><span className="min-w-0 flex-1 truncate">{event.type === "plan" ? "Plan" : event.type === "deadline" ? "Must" : "Bill"}: {event.label}</span>{event.amount && <span>{formatMoney(event.amount, currency)}</span>}</button>
+          <button key={event.id} onClick={() => event.goal && onEditGoal(event.goal)} disabled={!event.goal} className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold ${eventClasses(event.type)}`}><EventIcon type={event.type} /><span className="min-w-0 flex-1 truncate">{event.type === "plan" ? "Plan" : event.type === "deadline" ? "Must" : event.type === "income" ? "Income" : "Bill"}: {event.label}</span>{event.amount && <span>{formatMoney(event.amount, currency)}</span>}</button>
         ))}</div> : <p className="rounded-xl bg-slate-50 px-3 py-3 text-[11px] text-slate-400">Nothing scheduled for this date.</p>}
       </div>
     </Card>

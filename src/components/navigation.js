@@ -3,6 +3,7 @@ import {
   CalendarClock,
   ChartNoAxesColumnIncreasing,
   LayoutDashboard,
+  SlidersHorizontal,
   Target,
   TrendingUp,
   WalletCards
@@ -15,7 +16,8 @@ export const NAVIGATION = [
   { label: "Recurring", to: "/recurring", icon: CalendarClock },
   { label: "Goals", to: "/goals", icon: Target },
   { label: "Accounts", to: "/accounts", icon: WalletCards },
-  { label: "Transactions", to: "/transactions", icon: ArrowLeftRight }
+  { label: "Transactions", to: "/transactions", icon: ArrowLeftRight },
+  { label: "Organize", to: "/organize", icon: SlidersHorizontal }
 ];
 
 export const BUSINESS_NAVIGATION = [
@@ -25,7 +27,8 @@ export const BUSINESS_NAVIGATION = [
   { label: "Schedules", to: "/recurring", icon: CalendarClock },
   { label: "Reserves", to: "/goals", icon: Target },
   { label: "Accounts", to: "/accounts", icon: WalletCards },
-  { label: "Ledger", to: "/transactions", icon: ArrowLeftRight }
+  { label: "Ledger", to: "/transactions", icon: ArrowLeftRight },
+  { label: "Organize", to: "/organize", icon: SlidersHorizontal }
 ];
 
 export function navigationFor(profileType = "personal") {

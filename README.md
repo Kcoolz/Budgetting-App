@@ -31,6 +31,8 @@ npm.cmd run check
 ## Current features
 
 - Monthly category budgets
+- Month-specific budget plans that remain independent from historical months
+- Income-capped safe-to-spend guidance based on income actually recorded
 - Income and expense tracking
 - Financial accounts for cash, checking, savings, investments, credit cards, and loans
 - Account balances, net financial position, and amount-owed summaries
@@ -44,15 +46,24 @@ npm.cmd run check
 - Bills-first Spending workspace with fixed and flexible costs separated
 - Credit-card avalanche and snowball payoff projections
 - Overview debt-payoff snapshot with total balance, monthly plan, projected finish, and priority card
-- Weekly, monthly, and yearly recurring bill schedules
+- Weekly, biweekly, monthly, and yearly income or outgoing-payment schedules
 - Fourteen-day upcoming-obligations calendar
 - Savings goals with monthly fund assignments
 - Full-month planning calendar with bill dates, preferred goal dates, and hard deadlines
 - Goal pace guidance for both planned and must-have completion dates
 - Transaction review and category reconciliation queue
+- Custom spending categories, spending details, and tags
+- Split transactions across two or more budget categories
+- Reusable local rules that rename, categorize, and tag new or imported activity
+- On-device recurring-pattern suggestions from transaction history
+- Schedule inbox with paid, received, skipped, due, and overdue states
+- Forty-five-day account cash-flow forecasts based on future activity and schedules
+- Statement-balance account reconciliation with optional budget-excluded adjustments
+- Transaction search, filtering, and full editing
 - Optional per-category budget rollover
 - Currency selection (CAD, USD, EUR, GBP, AUD)
 - JSON data export and restore
+- Complete all-profile backups with a safety export before restore
 - Offline app shell and install manifest
 - Responsive desktop and Android layouts
 - Complete Overview dashboard plus focused Spending, Recurring, Goals, and Transactions pages
@@ -64,6 +75,7 @@ npm.cmd run check
 - Business command centre for revenue, operating costs, profit margin, tax set-asides, overhead, and bookkeeping review
 - Business expense classifications for software, advertising, payroll, equipment, travel, professional services, and more
 - Three-, six-, and twelve-month spending trends with category breakdowns
+- Twelve-month net-worth history and transaction CSV report exports
 - Detailed expense tracking for dining out, groceries, gas, transit, subscriptions, and more
 
 ## App pages
@@ -77,6 +89,7 @@ Cloud uses client-side hash routes so navigation works on localhost, static HTTP
 - `#/goals` - savings targets and fund assignments
 - `#/transactions` - quick add, review, and transaction history
 - `#/accounts` - account balances, account management, and internal transfers
+- `#/organize` - custom categories, tags, transaction rules, and recurring suggestions
 - `#/profiles` - create, rename, switch, and remove local budget profiles
 
 ## Data and installation
@@ -91,8 +104,7 @@ The included `.github/workflows/deploy-pages.yml` workflow installs dependencies
 
 ## Sensible next milestones
 
-1. Add CSV, OFX, and QFX transaction imports with duplicate detection.
-2. Add transaction editing, search, splits, and categorization rules.
-3. Add automatic recurring-pattern suggestions once transaction imports exist.
-4. Choose an authentication and encrypted cloud-sync design if multi-device sync is needed.
-5. Add end-to-end browser tests before connecting real accounts or deploying broadly.
+1. Add end-to-end browser and accessibility tests before deploying broadly.
+2. Add encrypted backup files and optional local privacy locking.
+3. Add richer goal transfers and automatic contribution schedules.
+4. Add optional manual investment holdings and performance history.

@@ -7,7 +7,7 @@ function dateLabel(value) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${value}T12:00:00`));
 }
 
-export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, onDelete, profileType = "personal" }) {
+export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, onDelete, onRemoveContribution, profileType = "personal" }) {
   const assignedThisMonth = sum(goals.map((goal) => goal.assignedThisMonth));
   const business = profileType === "business";
 
@@ -70,6 +70,19 @@ export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, o
               <button onClick={() => onAssign(goal)} className="interactive-button mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-forest-700/15 bg-white py-2 text-[11px] font-bold text-forest-700 hover:-translate-y-px hover:bg-forest-50">
                 <LockKeyhole className="size-3.5" /> Assign funds
               </button>
+              {goal.contributions?.length > 0 && (
+                <details className="mt-3 border-t border-black/5 pt-3">
+                  <summary className="cursor-pointer text-[10px] font-bold text-slate-500">Assignment history ({goal.contributions.length})</summary>
+                  <div className="mt-2 grid gap-1.5">
+                    {[...goal.contributions].sort((a, b) => b.date.localeCompare(a.date)).map((contribution) => (
+                      <div key={contribution.id} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-[10px]">
+                        <span className="min-w-0 flex-1"><strong>{formatMoney(contribution.amount, currency)}</strong><span className="ml-1 text-slate-400">on {contribution.date}</span></span>
+                        <button onClick={() => onRemoveContribution(goal, contribution)} className="interactive-button grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Remove ${formatMoney(contribution.amount, currency)} assignment from ${goal.name}`}><Trash2 className="size-3.5" /></button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </article>
           ))}
         </div>

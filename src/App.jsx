@@ -10,17 +10,19 @@ import GoalModal from "./components/GoalModal";
 import Header from "./components/Header";
 import MobileNav from "./components/MobileNav";
 import ProfileModal from "./components/ProfileModal";
+import ReconcileModal from "./components/ReconcileModal";
 import RecurringModal from "./components/RecurringModal";
 import Sidebar from "./components/Sidebar";
 import Toast from "./components/Toast";
 import TransactionModal from "./components/TransactionModal";
+import TransactionImportModal from "./components/TransactionImportModal";
 import TransferModal from "./components/TransferModal";
-import { useAuth } from "./components/AuthGate";
 import { useBudgetStore } from "./hooks/useBudgetStore";
 import GoalsPage from "./pages/GoalsPage";
 import AccountsPage from "./pages/AccountsPage";
 import BusinessOverviewPage from "./pages/BusinessOverviewPage";
 import OverviewPage from "./pages/OverviewPage";
+import OrganizePage from "./pages/OrganizePage";
 import ProfilesPage from "./pages/ProfilesPage";
 import RecurringPage from "./pages/RecurringPage";
 import SpendingPage from "./pages/SpendingPage";
@@ -29,13 +31,15 @@ import TrendsPage from "./pages/TrendsPage";
 import {
   dateForMonth,
   expenseCategoriesFor,
+  expenseSubcategoriesFor,
   getGoalSummaries,
   getMonthlySummary,
   getSafeToSpend,
   getSpendingComparison,
   getUpcomingBills,
   localDate,
-  parseQuickTransaction
+  parseQuickTransaction,
+  shiftMonth
 } from "./lib/budget";
 import { accountHasActivity, getAccountBalances, getLinkedDebts } from "./lib/accounts";
 
@@ -47,6 +51,7 @@ const routeTitles = {
   "/goals": "Goals",
   "/transactions": "Transactions",
   "/accounts": "Accounts",
+  "/organize": "Organize",
   "/profiles": "Profiles"
 };
 
@@ -55,7 +60,7 @@ function RouteEffects({ profileType = "personal" }) {
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
-    const businessTitles = { "/": "Business Overview", "/spending": "Operations", "/trends": "Business Insights", "/recurring": "Schedules", "/goals": "Reserves", "/transactions": "Business Ledger", "/accounts": "Business Accounts", "/profiles": "Profiles" };
+    const businessTitles = { "/": "Business Overview", "/spending": "Operations", "/trends": "Business Insights", "/recurring": "Schedules", "/goals": "Reserves", "/transactions": "Business Ledger", "/accounts": "Business Accounts", "/organize": "Organize", "/profiles": "Profiles" };
     const title = profileType === "business" ? businessTitles[pathname] : routeTitles[pathname];
     document.title = `${title ?? "Overview"} - Cloud Budget`;
   }, [pathname, profileType]);
@@ -66,45 +71,66 @@ function RouteEffects({ profileType = "personal" }) {
 export default function App() {
   const {
     state,
+    profileBackup,
+    storageError,
     profiles,
     activeProfile,
-    syncStatus,
     switchProfile,
     createProfile,
     updateProfile,
     deleteProfile,
     addTransaction,
+    updateTransaction,
+    importTransactions,
     deleteTransaction,
     reviewTransaction,
     updateTransactionCategory,
     updateTransactionSubcategory,
+    saveCustomCategory,
+    toggleCustomCategory,
+    saveCustomSubcategory,
+    saveTag,
+    deleteTag,
+    saveRule,
+    toggleRule,
+    deleteRule,
     saveAccount,
     deleteAccount,
-    addTransfer,
+    saveTransfer,
     deleteTransfer,
-    addRecurringBill,
+    saveRecurringBill,
+    toggleRecurringBill,
     deleteRecurringBill,
+    updateScheduleOccurrence,
+    saveReconciliation,
     saveGoal,
     deleteGoal,
     assignToGoal,
+    removeGoalContribution,
     updateDashboard,
     saveDebt,
     deleteDebt,
     updateDebtPlan,
     updateBudget,
-    importState
+    importState,
+    importProfileStore
   } = useBudgetStore();
-  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [selectedMonth, setSelectedMonth] = useState(localDate().slice(0, 7));
   const [transactionOpen, setTransactionOpen] = useState(false);
+  const [transactionImportOpen, setTransactionImportOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState(null);
+  const [newTransactionType, setNewTransactionType] = useState("expense");
   const [accountOpen, setAccountOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
+  const [reconcilingAccount, setReconcilingAccount] = useState(null);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [editingTransfer, setEditingTransfer] = useState(null);
   const [transferAfterAccount, setTransferAfterAccount] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [recurringOpen, setRecurringOpen] = useState(false);
+  const [editingRecurring, setEditingRecurring] = useState(null);
   const [goalOpen, setGoalOpen] = useState(false);
   const [editingGoal, setEditingGoal] = useState(null);
   const [debtOpen, setDebtOpen] = useState(false);
@@ -117,7 +143,8 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [installPrompt, setInstallPrompt] = useState(null);
   const toastTimer = useRef(null);
-  const expenseCategories = expenseCategoriesFor(activeProfile.type);
+  const expenseCategories = expenseCategoriesFor(activeProfile.type, state);
+  const expenseSubcategories = expenseSubcategoriesFor(activeProfile.type, state);
 
   const summary = useMemo(() => getMonthlySummary(state, selectedMonth), [state, selectedMonth]);
   const comparison = useMemo(() => getSpendingComparison(state, selectedMonth), [state, selectedMonth]);
@@ -125,9 +152,12 @@ export default function App() {
     () => getSafeToSpend(summary.spendableRemaining, selectedMonth),
     [summary.spendableRemaining, selectedMonth]
   );
-  const upcomingBills = useMemo(() => getUpcomingBills(state.recurringBills), [state.recurringBills]);
+  const upcomingBills = useMemo(
+    () => getUpcomingBills(state.recurringBills.filter((bill) => bill.type !== "income")),
+    [state.recurringBills]
+  );
   const goals = useMemo(() => getGoalSummaries(state.goals, selectedMonth), [state.goals, selectedMonth]);
-  const linkedDebts = useMemo(() => getLinkedDebts(state), [state]);
+  const linkedDebts = useMemo(() => getLinkedDebts(state, localDate()), [state]);
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(
     new Date(`${selectedMonth}-01T12:00:00`)
   );
@@ -158,10 +188,18 @@ export default function App() {
   };
 
   const handleTransaction = (transaction) => {
-    addTransaction(transaction);
+    if (transaction.id) updateTransaction(transaction);
+    else addTransaction(transaction);
     setSelectedMonth(transaction.date.slice(0, 7));
     setTransactionOpen(false);
-    notify("Transaction saved.");
+    setEditingTransaction(null);
+    notify(transaction.id ? "Transaction updated." : "Transaction saved.");
+  };
+
+  const openTransactionEditor = (transaction = null, defaultType = "expense") => {
+    setEditingTransaction(transaction);
+    setNewTransactionType(transaction?.type ?? defaultType);
+    setTransactionOpen(true);
   };
 
   const handleQuickAdd = (event) => {
@@ -171,14 +209,22 @@ export default function App() {
       setQuickError('Use an amount followed by a description, like "15 Coffee".');
       return;
     }
-    addTransaction({ ...parsed, type: "expense", date: dateForMonth(selectedMonth), accountId: state.accounts[0].id });
+    addTransaction({ ...parsed, type: "expense", date: dateForMonth(selectedMonth), accountId: state.accounts[0].id, cleared: true });
     setQuickValue("");
     setQuickError("");
     notify(`${parsed.description} added to ${parsed.category}.`);
   };
 
+  const handleTransactionImport = (transactions) => {
+    importTransactions(transactions);
+    const latestMonth = transactions.map(({ date }) => date.slice(0, 7)).sort().at(-1);
+    if (latestMonth) setSelectedMonth(latestMonth);
+    setTransactionImportOpen(false);
+    notify(`${transactions.length} transaction${transactions.length === 1 ? "" : "s"} imported for review.`);
+  };
+
   const handleBudgetSave = (value) => {
-    updateBudget(value);
+    updateBudget(value, selectedMonth);
     setBudgetOpen(false);
     notify("Monthly budget saved.");
   };
@@ -190,15 +236,32 @@ export default function App() {
   };
 
   const handleRecurringSave = (bill) => {
-    addRecurringBill(bill);
+    saveRecurringBill(bill);
     setRecurringOpen(false);
-    notify("Recurring bill scheduled.");
+    setEditingRecurring(null);
+    notify(bill.id ? "Schedule updated." : "Recurring payment scheduled.");
+  };
+
+  const openRecurringEditor = (bill = null) => {
+    setEditingRecurring(bill);
+    setRecurringOpen(true);
   };
 
   const handleRecurringDelete = (bill) => {
     if (!window.confirm(`Delete the ${bill.description} schedule?`)) return;
     deleteRecurringBill(bill.id);
     notify("Recurring schedule deleted.");
+  };
+
+  const handleRecurringSuggestion = (suggestion) => {
+    const { id: _suggestionId, occurrences: _occurrences, ...schedule } = suggestion;
+    saveRecurringBill({ ...schedule, active: true });
+    notify(`${suggestion.description} added as a ${suggestion.frequency} schedule.`);
+  };
+
+  const handleScheduleOccurrence = (occurrence, status) => {
+    updateScheduleOccurrence(occurrence, status);
+    notify(status === "skipped" ? `${occurrence.description} skipped.` : `${occurrence.description} recorded.`);
   };
 
   const handleGoalSave = (goal) => {
@@ -214,7 +277,9 @@ export default function App() {
   };
 
   const handleGoalContribution = (goalId, contribution) => {
-    if (Number(contribution.amount) > Math.max(summary.spendableRemaining, 0)) {
+    const contributionMonth = contribution.date.slice(0, 7);
+    const contributionSummary = getMonthlySummary(state, contributionMonth);
+    if (Number(contribution.amount) > Math.max(contributionSummary.spendableRemaining, 0)) {
       notify("That assignment is higher than your available amount.");
       return;
     }
@@ -225,6 +290,12 @@ export default function App() {
     assignToGoal(goalId, contribution);
     setSelectedGoal(null);
     notify("Funds assigned to your goal.");
+  };
+
+  const handleGoalContributionDelete = (goal, contribution) => {
+    if (!window.confirm(`Remove the ${formatContributionAmount(contribution.amount, state.currency)} assignment from ${goal.name}?`)) return;
+    removeGoalContribution(goal.id, contribution.id);
+    notify("Goal assignment removed.");
   };
 
   const handleGoalDelete = (goal) => {
@@ -264,6 +335,7 @@ export default function App() {
   };
 
   const requestTransfer = () => {
+    setEditingTransfer(null);
     if (state.accounts.length > 1) {
       setTransferOpen(true);
       return;
@@ -302,10 +374,22 @@ export default function App() {
     notify("Account deleted.");
   };
 
+  const handleReconciliation = (snapshot, addAdjustment) => {
+    saveReconciliation(snapshot, addAdjustment);
+    setReconcilingAccount(null);
+    notify(Math.abs(snapshot.difference) < 0.005 ? "Account reconciled with no difference." : addAdjustment ? "Account reconciled and adjusted." : "Reconciliation checkpoint saved.");
+  };
+
   const handleTransferSave = (transfer) => {
-    addTransfer(transfer);
+    saveTransfer(transfer);
     setTransferOpen(false);
-    notify("Transfer saved without changing spending totals.");
+    setEditingTransfer(null);
+    notify(transfer.id ? "Transfer updated." : "Transfer saved without changing spending totals.");
+  };
+
+  const openTransferEditor = (transfer) => {
+    setEditingTransfer(transfer);
+    setTransferOpen(true);
   };
 
   const handleTransferDelete = (transfer) => {
@@ -356,12 +440,36 @@ export default function App() {
     notify("Backup downloaded.");
   };
 
+  const handleProfilesExport = () => {
+    const blob = new Blob([JSON.stringify({ format: "cloud-budget-profiles", ...profileBackup }, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `cloud-budget-all-profiles-${localDate()}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    notify("Complete local backup downloaded.");
+  };
+
+  const handleProfilesImport = async (file) => {
+    try {
+      const value = JSON.parse(await file.text());
+      if (value?.format !== "cloud-budget-profiles" || !Array.isArray(value.profiles)) throw new Error("Invalid profile backup");
+      if (!window.confirm("Replace every local Cloud profile with this backup? A safety backup will download first.")) return;
+      handleProfilesExport();
+      importProfileStore(value);
+      notify("All profiles restored.");
+    } catch {
+      notify("That file is not a valid all-profile Cloud backup.");
+    }
+  };
+
   const handleImport = async (file) => {
     try {
       const value = JSON.parse(await file.text());
-      const valid = [1, 2, 3].includes(value?.version) && value.budgets && Array.isArray(value.transactions);
+      const valid = [1, 2, 3, 4, 5].includes(value?.version) && value.budgets && Array.isArray(value.transactions);
       if (!valid) throw new Error("Invalid backup");
       if (!window.confirm(`Replace the budget data in ${activeProfile.name} with this backup?`)) return;
+      handleExport();
       importState(value);
       setBudgetOpen(false);
       notify("Backup restored.");
@@ -380,6 +488,9 @@ export default function App() {
     transactions: summary.transactions,
     accounts: state.accounts,
     currency: state.currency,
+    categories: expenseCategories,
+    subcategories: expenseSubcategories,
+    tags: state.tags,
     quickValue,
     quickError,
     onQuickChange: (value) => {
@@ -387,7 +498,9 @@ export default function App() {
       if (quickError) setQuickError("");
     },
     onQuickAdd: handleQuickAdd,
-    onAdd: () => setTransactionOpen(true),
+    onAdd: () => openTransactionEditor(),
+    onImport: () => setTransactionImportOpen(true),
+    onEdit: openTransactionEditor,
     onTransfer: requestTransfer,
     onDelete: handleDelete,
     onReview: reviewTransaction,
@@ -399,12 +512,14 @@ export default function App() {
   return (
     <div className={`min-h-screen ${activeProfile.type === "business" ? "business-shell" : ""}`}>
       <RouteEffects profileType={activeProfile.type} />
-      <Sidebar profileType={activeProfile.type} cloudSyncActive={Boolean(user)} />
+      <Sidebar profileType={activeProfile.type} />
       <div className="lg:ml-60">
         <Header
           selectedMonth={selectedMonth}
           onMonthChange={(month) => month && setSelectedMonth(month)}
-          onAdd={() => setTransactionOpen(true)}
+          onMonthStep={(amount) => setSelectedMonth((month) => shiftMonth(month, amount))}
+          onCurrentMonth={() => setSelectedMonth(localDate().slice(0, 7))}
+          onAdd={() => openTransactionEditor()}
           installAvailable={Boolean(installPrompt)}
           onInstall={handleInstall}
           profiles={profiles}
@@ -412,12 +527,15 @@ export default function App() {
           onSwitchProfile={handleProfileSwitch}
           onManageProfiles={() => navigate("/profiles")}
           profileType={activeProfile.type}
-          syncStatus={syncStatus}
-          account={user}
-          onSignOut={signOut}
         />
 
         <main className="mx-auto w-full max-w-[1240px] px-4 pb-32 pt-8 sm:px-6 sm:pt-10 lg:px-10 lg:pb-20 xl:px-14">
+          {storageError && (
+            <section className="mb-5 flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800 sm:flex-row sm:items-center" role="alert">
+              <p className="flex-1 text-xs font-semibold leading-relaxed">{storageError}</p>
+              <button onClick={handleProfilesExport} className="interactive-button min-h-10 rounded-xl bg-rose-700 px-4 text-xs font-bold text-white hover:bg-rose-800">Export all profiles</button>
+            </section>
+          )}
           <Routes>
             <Route
               index
@@ -429,7 +547,7 @@ export default function App() {
                     debts={linkedDebts}
                     selectedMonth={selectedMonth}
                     profile={activeProfile}
-                    onAddTransaction={() => setTransactionOpen(true)}
+                    onAddTransaction={() => openTransactionEditor()}
                     onManageBudget={() => setBudgetOpen(true)}
                   />
                 ) : (
@@ -444,6 +562,8 @@ export default function App() {
                   debts={linkedDebts}
                   onManageBudget={() => setBudgetOpen(true)}
                   onCustomize={() => setCustomizeOpen(true)}
+                  onAddIncome={() => openTransactionEditor(null, "income")}
+                  onAddSchedule={() => openRecurringEditor()}
                 />
                 )
               }
@@ -476,9 +596,15 @@ export default function App() {
                   state={state}
                   goals={goals}
                   onAddBill={() => setRecurringOpen(true)}
+                  onEditBill={openRecurringEditor}
+                  onToggleBill={(bill) => {
+                    toggleRecurringBill(bill.id);
+                    notify(bill.active === false ? "Schedule resumed." : "Schedule paused.");
+                  }}
                   onDeleteBill={handleRecurringDelete}
                   onAddGoal={() => openGoalEditor()}
                   onEditGoal={openGoalEditor}
+                  onUpdateOccurrence={handleScheduleOccurrence}
                   profileType={activeProfile.type}
                 />
               }
@@ -493,6 +619,7 @@ export default function App() {
                   onAssign={setSelectedGoal}
                   onEdit={openGoalEditor}
                   onDelete={handleGoalDelete}
+                  onRemoveContribution={handleGoalContributionDelete}
                   profileType={activeProfile.type}
                 />
               }
@@ -507,8 +634,49 @@ export default function App() {
                   onAddAccount={() => openAccountEditor()}
                   onEditAccount={openAccountEditor}
                   onDeleteAccount={handleAccountDelete}
+                  onReconcileAccount={setReconcilingAccount}
                   onAddTransfer={requestTransfer}
+                  onEditTransfer={openTransferEditor}
                   onDeleteTransfer={handleTransferDelete}
+                />
+              }
+            />
+            <Route
+              path="organize"
+              element={
+                <OrganizePage
+                  state={state}
+                  profileType={activeProfile.type}
+                  onSaveCategory={(category) => {
+                    saveCustomCategory(category);
+                    notify("Category saved.");
+                  }}
+                  onToggleCategory={(id) => {
+                    toggleCustomCategory(id);
+                    notify("Category visibility updated.");
+                  }}
+                  onSaveSubcategory={(subcategory) => {
+                    saveCustomSubcategory(subcategory);
+                    notify("Spending detail saved.");
+                  }}
+                  onSaveTag={(tag) => {
+                    saveTag(tag);
+                    notify("Tag saved.");
+                  }}
+                  onDeleteTag={(id) => {
+                    deleteTag(id);
+                    notify("Tag removed.");
+                  }}
+                  onSaveRule={(rule) => {
+                    saveRule(rule);
+                    notify("Transaction rule created.");
+                  }}
+                  onToggleRule={toggleRule}
+                  onDeleteRule={(id) => {
+                    deleteRule(id);
+                    notify("Transaction rule deleted.");
+                  }}
+                  onAcceptSuggestion={handleRecurringSuggestion}
                 />
               }
             />
@@ -522,6 +690,8 @@ export default function App() {
                   onAdd={() => openProfileEditor()}
                   onEdit={openProfileEditor}
                   onDelete={handleProfileDelete}
+                  onExportAll={handleProfilesExport}
+                  onImportAll={handleProfilesImport}
                 />
               }
             />
@@ -531,7 +701,7 @@ export default function App() {
       </div>
 
       <button
-        onClick={() => setTransactionOpen(true)}
+        onClick={() => openTransactionEditor()}
         className={`interactive-button fixed bottom-20 right-5 z-20 grid size-14 place-items-center rounded-2xl text-white shadow-xl hover:-translate-y-px sm:hidden ${activeProfile.type === "business" ? "bg-[#174c47] hover:bg-[#102c2b]" : "bg-forest-900 hover:bg-forest-800"}`}
         aria-label="Add transaction"
       >
@@ -541,15 +711,34 @@ export default function App() {
 
       <TransactionModal
         open={transactionOpen}
-        onClose={() => setTransactionOpen(false)}
+        transaction={editingTransaction}
+        defaultType={newTransactionType}
+        onClose={() => {
+          setTransactionOpen(false);
+          setEditingTransaction(null);
+          setNewTransactionType("expense");
+        }}
         onSave={handleTransaction}
         onTransfer={() => {
           setTransactionOpen(false);
+          setEditingTransaction(null);
           requestTransfer();
         }}
         currency={state.currency}
         selectedMonth={selectedMonth}
         accounts={state.accounts}
+        categories={expenseCategories}
+        subcategories={expenseSubcategories}
+        tags={state.tags}
+        profileType={activeProfile.type}
+      />
+      <TransactionImportModal
+        open={transactionImportOpen}
+        onClose={() => setTransactionImportOpen(false)}
+        onImport={handleTransactionImport}
+        accounts={state.accounts}
+        existingTransactions={state.transactions}
+        currency={state.currency}
         profileType={activeProfile.type}
       />
       <AccountModal
@@ -564,13 +753,24 @@ export default function App() {
         currency={state.currency}
         profileType={activeProfile.type}
       />
+      <ReconcileModal
+        open={Boolean(reconcilingAccount)}
+        account={reconcilingAccount}
+        state={state}
+        onClose={() => setReconcilingAccount(null)}
+        onSave={handleReconciliation}
+      />
       <TransferModal
         open={transferOpen}
+        transfer={editingTransfer}
         accounts={state.accounts}
-        balances={getAccountBalances(state)}
+        balances={getAccountBalances(state, localDate())}
         currency={state.currency}
         selectedMonth={selectedMonth}
-        onClose={() => setTransferOpen(false)}
+        onClose={() => {
+          setTransferOpen(false);
+          setEditingTransfer(null);
+        }}
         onSave={handleTransferSave}
       />
       <BudgetModal
@@ -578,6 +778,7 @@ export default function App() {
         onClose={() => setBudgetOpen(false)}
         state={state}
         selectedMonth={selectedMonth}
+        recordedIncome={summary.income}
         onSave={handleBudgetSave}
         onExport={handleExport}
         onImport={handleImport}
@@ -592,10 +793,15 @@ export default function App() {
       />
       <RecurringModal
         open={recurringOpen}
-        onClose={() => setRecurringOpen(false)}
+        schedule={editingRecurring}
+        onClose={() => {
+          setRecurringOpen(false);
+          setEditingRecurring(null);
+        }}
         onSave={handleRecurringSave}
         currency={state.currency}
         categories={expenseCategories}
+        accounts={state.accounts}
         profileType={activeProfile.type}
       />
       <GoalModal
@@ -615,7 +821,7 @@ export default function App() {
         accounts={state.accounts.filter((account) => account.type === "credit" && (
           account.id === selectedDebt?.accountId || !state.debts.some((debt) => debt.accountId === account.id)
         ))}
-        balances={getAccountBalances(state)}
+        balances={getAccountBalances(state, localDate())}
         onClose={() => {
           setDebtOpen(false);
           setSelectedDebt(null);
@@ -630,6 +836,7 @@ export default function App() {
         currency={state.currency}
         selectedMonth={selectedMonth}
         available={summary.spendableRemaining}
+        availableForDate={(date) => getMonthlySummary(state, date.slice(0, 7)).spendableRemaining}
       />
       <ProfileModal
         open={profileOpen}
@@ -644,4 +851,8 @@ export default function App() {
       <Toast message={toast} />
     </div>
   );
+}
+
+function formatContributionAmount(amount, currency) {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
 }

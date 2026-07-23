@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Check, ChevronDown, Plus, Repeat2, Trash2, Zap } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Check, ChevronDown, Pencil, Plus, Repeat2, Search, Trash2, Upload, Zap } from "lucide-react";
 import {
   categoryName,
   expenseCategoriesFor,
@@ -12,11 +12,25 @@ import {
 import Button from "./ui/Button";
 import Card from "./ui/Card";
 
-export default function TransactionsPanel({ transactions, accounts = [], currency, quickValue, quickError, onQuickChange, onQuickAdd, onAdd, onTransfer, onDelete, onReview, onCategoryChange, onSubcategoryChange, profileType = "personal" }) {
+export default function TransactionsPanel({ transactions, accounts = [], currency, categories: providedCategories, subcategories: providedSubcategories, tags = [], quickValue, quickError, onQuickChange, onQuickAdd, onAdd, onEdit, onImport, onTransfer, onDelete, onReview, onCategoryChange, onSubcategoryChange, profileType = "personal" }) {
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
   const unreviewed = transactions.filter((transaction) => transaction.reviewed === false);
   const business = profileType === "business";
   const accountNames = Object.fromEntries(accounts.map(({ id, name }) => [id, name]));
+  const expenseCategories = providedCategories ?? expenseCategoriesFor(profileType);
+  const expenseSubcategories = providedSubcategories ?? expenseSubcategoriesFor(profileType);
+  const tagNames = Object.fromEntries(tags.map(({ id, name }) => [id, name]));
+  const categoryLabel = (transaction) => transaction.type === "income"
+    ? categoryName(transaction.category, transaction.type, profileType)
+    : expenseCategories.find(({ id }) => id === transaction.category)?.name ?? "Other";
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleTransactions = transactions.filter((transaction) => (
+    (typeFilter === "all" || transaction.type === typeFilter || (typeFilter === "pending" && transaction.cleared === false)) &&
+    (!normalizedQuery || [transaction.description, accountNames[transaction.accountId], categoryLabel(transaction), ...(transaction.tags ?? []).map((id) => tagNames[id])]
+      .some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery)))
+  ));
 
   return (
     <Card id="transactions" className="overflow-hidden">
@@ -26,9 +40,10 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
             <p className="eyebrow">Activity</p>
             <h2 className="mt-1 text-lg font-semibold tracking-[-0.025em]">{business ? "Ledger entries" : "Transactions"}</h2>
           </div>
-          <div className="mobile-hidden flex gap-2">
-            <Button onClick={onTransfer}><Repeat2 className="size-4" /> Transfer</Button>
-            <Button onClick={onAdd}><Plus className="size-4" /> Add transaction</Button>
+          <div className="flex gap-2">
+            <Button onClick={onImport} className="px-3"><Upload className="size-4" /><span className="hidden sm:inline">Import</span></Button>
+            <Button onClick={onTransfer} className="mobile-hidden"><Repeat2 className="size-4" /> Transfer</Button>
+            <Button onClick={onAdd} className="mobile-hidden"><Plus className="size-4" /> Add transaction</Button>
           </div>
         </div>
 
@@ -49,6 +64,23 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
           {quickError && <p className="absolute left-1 top-full mt-1.5 text-[11px] font-medium text-rose-600">{quickError}</p>}
         </form>
 
+        <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+          <label className="flex min-h-10 flex-1 items-center rounded-xl border border-black/[0.06] bg-white px-3 focus-within:border-forest-700/25 focus-within:ring-4 focus-within:ring-forest-700/8">
+            <Search className="mr-2 size-3.5 text-slate-400" />
+            <span className="sr-only">Search transactions</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 border-0 bg-transparent text-xs outline-none" placeholder="Search description, category, or account" />
+          </label>
+          <label>
+            <span className="sr-only">Filter transaction type</span>
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} className="min-h-10 w-full rounded-xl border border-black/[0.06] bg-white px-3 text-xs font-semibold outline-none sm:w-36">
+              <option value="all">All activity</option>
+              <option value="expense">Expenses</option>
+              <option value="income">Income</option>
+              <option value="pending">Pending</option>
+            </select>
+          </label>
+        </div>
+
         {unreviewed.length > 0 && (
           <div className="rounded-xl border border-orange-200/70 bg-orange-50/70">
             <button type="button" onClick={() => setReviewOpen((value) => !value)} className="interactive-button flex w-full items-center gap-3 px-4 py-3 text-left hover:-translate-y-px">
@@ -60,8 +92,8 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
             {reviewOpen && (
               <div className="grid gap-2 border-t border-orange-200/60 p-3">
                 {unreviewed.map((transaction) => {
-                  const categories = transaction.type === "income" ? incomeCategoriesFor(profileType) : expenseCategoriesFor(profileType);
-                  const subcategories = expenseSubcategoriesFor(profileType).filter((item) => item.category === transaction.category);
+                  const categories = transaction.type === "income" ? incomeCategoriesFor(profileType) : expenseCategories;
+                  const subcategories = expenseSubcategories.filter((item) => item.category === transaction.category);
                   return (
                     <article key={transaction.id} className="grid gap-2 rounded-xl bg-white p-3 shadow-sm sm:grid-cols-[minmax(0,1fr)_150px_150px_auto] sm:items-center">
                       <div className="min-w-0">
@@ -86,36 +118,37 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
         )}
       </div>
 
-      {!transactions.length ? (
+      {!visibleTransactions.length ? (
         <div className="grid min-h-48 place-items-center border-t border-black/5 px-6 text-center">
           <div>
             <span className="mx-auto grid size-10 place-items-center rounded-full border border-dashed border-slate-300 text-slate-400">○</span>
-            <strong className="mt-3 block text-sm">No {business ? "ledger entries" : "transactions"} this month</strong>
-            <p className="mt-1 text-xs text-slate-400">{business ? "Record revenue or an operating expense to get started." : "Quick add an expense or record income to get started."}</p>
+            <strong className="mt-3 block text-sm">{transactions.length ? "No matching activity" : `No ${business ? "ledger entries" : "transactions"} this month`}</strong>
+            <p className="mt-1 text-xs text-slate-400">{transactions.length ? "Try a different search or filter." : business ? "Record revenue or an operating expense to get started." : "Quick add an expense or record income to get started."}</p>
           </div>
         </div>
       ) : (
         <div className="border-t border-black/5">
-          <div className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_32px] gap-4 px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 md:grid">
+          <div className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_68px] gap-4 px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 md:grid">
             <span>Description</span><span>Category</span><span>Date</span><span className="text-right">Amount</span><span />
           </div>
-          {transactions.map((transaction) => {
+          {visibleTransactions.map((transaction) => {
             const income = transaction.type === "income";
             const date = new Date(`${transaction.date}T12:00:00`);
             return (
-              <article key={transaction.id} className="group grid grid-cols-[minmax(0,1fr)_auto_28px] items-center gap-x-3 gap-y-1 border-t border-black/[0.045] px-5 py-3.5 text-xs first:border-t-0 md:grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_32px] md:gap-4 md:px-6">
+              <article key={transaction.id} className="group grid grid-cols-[minmax(0,1fr)_auto_68px] items-center gap-x-3 gap-y-1 border-t border-black/[0.045] px-5 py-3.5 text-xs first:border-t-0 md:grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_68px] md:gap-4 md:px-6">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${income ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-700"}`}>
                     {income ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}
                   </span>
                   <span className="min-w-0">
-                    <span className="flex min-w-0 items-center gap-2"><strong className="truncate font-semibold">{transaction.description}</strong>{transaction.reviewed === false && <span className="size-1.5 shrink-0 rounded-full bg-orange-400" title="Needs review" />}</span>
+                    <span className="flex min-w-0 items-center gap-2"><strong className="truncate font-semibold">{transaction.description}</strong>{transaction.reviewed === false && <span className="size-1.5 shrink-0 rounded-full bg-orange-400" title="Needs review" />}{transaction.cleared === false && <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[8px] font-bold text-blue-700">Pending</span>}</span>
                     <span className="mt-0.5 block truncate text-[9px] text-slate-400">{accountNames[transaction.accountId] ?? "Main account"}</span>
                   </span>
                 </div>
                 <span className="col-start-1 pl-12 text-[11px] text-slate-500 md:col-auto md:pl-0 md:text-xs">
-                  {categoryName(transaction.category, transaction.type, profileType)}
-                  {!income && <span className="mt-0.5 block text-[9px] text-slate-400">{subcategoryName(getTransactionSubcategory(transaction, profileType))}</span>}
+                  {transaction.splits?.length ? `${transaction.splits.length}-way split` : categoryLabel(transaction)}
+                  {!income && !transaction.splits?.length && <span className="mt-0.5 block text-[9px] text-slate-400">{expenseSubcategories.find(({ id }) => id === transaction.subcategory)?.name ?? subcategoryName(getTransactionSubcategory(transaction, profileType))}</span>}
+                  {(transaction.tags ?? []).length > 0 && <span className="mt-1 flex flex-wrap gap-1">{transaction.tags.map((id) => tagNames[id] && <span key={id} className="rounded-full bg-violet-50 px-1.5 py-0.5 text-[8px] font-semibold text-violet-700">#{tagNames[id]}</span>)}</span>}
                 </span>
                 <time className="col-start-2 row-start-2 text-right text-[11px] text-slate-500 md:col-auto md:row-auto md:text-left md:text-xs" dateTime={transaction.date}>
                   {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date)}
@@ -123,13 +156,10 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
                 <strong className={`col-start-2 row-start-1 text-right font-bold ${income ? "text-emerald-700" : "text-ink-900"}`}>
                   {income ? "+" : "−"}{formatMoney(transaction.amount, currency)}
                 </strong>
-                <button
-                  onClick={() => onDelete(transaction)}
-                  className="interactive-button col-start-3 row-span-2 row-start-1 grid size-8 place-items-center rounded-lg text-slate-400 hover:-translate-y-px hover:bg-rose-50 hover:text-rose-600 md:col-auto md:row-auto md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
-                  aria-label={`Delete ${transaction.description}`}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+                <div className="col-start-3 row-span-2 row-start-1 flex md:col-auto md:row-auto md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
+                  <button onClick={() => onEdit(transaction)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:-translate-y-px hover:bg-forest-50 hover:text-forest-800" aria-label={`Edit ${transaction.description}`}><Pencil className="size-3.5" /></button>
+                  <button onClick={() => onDelete(transaction)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:-translate-y-px hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${transaction.description}`}><Trash2 className="size-3.5" /></button>
+                </div>
               </article>
             );
           })}

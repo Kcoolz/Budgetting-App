@@ -1,4 +1,5 @@
-import { ArrowRight, Building2, Check, Pencil, Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react";
+import { useRef } from "react";
+import { ArrowRight, Building2, Check, Download, Pencil, Plus, ShieldCheck, Trash2, Upload, UsersRound } from "lucide-react";
 import PageIntro from "../components/PageIntro";
 import ProfileAvatar from "../components/ProfileAvatar";
 import Button from "../components/ui/Button";
@@ -13,14 +14,24 @@ function profileStats(profile) {
   ];
 }
 
-export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd, onEdit, onDelete }) {
+export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd, onEdit, onDelete, onExportAll, onImportAll }) {
+  const fileInput = useRef(null);
   return (
     <>
       <PageIntro
         eyebrow="Budget profiles"
         title="A separate space for every plan."
         description="Keep personal, household, or side-project finances apart while using the same private app."
-        action={<Button variant="primary" onClick={onAdd}><Plus className="size-4" /> New profile</Button>}
+        action={<div className="flex flex-wrap gap-2">
+          <input ref={fileInput} type="file" accept="application/json,.json" className="sr-only" onChange={(event) => {
+            const [file] = event.target.files;
+            event.target.value = "";
+            if (file) onImportAll(file);
+          }} />
+          <Button onClick={() => fileInput.current?.click()}><Upload className="size-4" /> Restore all</Button>
+          <Button onClick={onExportAll}><Download className="size-4" /> Backup all</Button>
+          <Button variant="primary" onClick={onAdd}><Plus className="size-4" /> New profile</Button>
+        </div>}
       />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">

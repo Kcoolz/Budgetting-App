@@ -53,7 +53,7 @@ export default function BusinessOverviewPage({ state, summary, selectedMonth, pr
   const afterTaxReserve = profit - taxReserve;
   const performance = monthlyPerformance(state.transactions, selectedMonth);
   const chartMax = Math.max(...performance.flatMap(({ revenue, expenses }) => [revenue, expenses]), 1);
-  const monthlyOverhead = sum(state.recurringBills.filter(({ active }) => active !== false).map(monthlyRecurringAmount));
+  const monthlyOverhead = sum(state.recurringBills.filter(({ active, type }) => active !== false && type !== "income").map(monthlyRecurringAmount));
   const unreviewed = state.transactions.filter(({ reviewed }) => reviewed === false).length;
   const expenseRows = BUSINESS_EXPENSE_CATEGORIES
     .map((category) => ({ ...category, amount: summary.categorySpending[category.id] ?? 0 }))
