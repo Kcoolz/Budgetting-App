@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, FastForward, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, Check, FastForward, FlaskConical, TrendingDown, TrendingUp } from "lucide-react";
 import { formatMoney, localDate } from "../lib/budget";
 import { getProjectedCashFlow, getScheduleTimeline } from "../lib/planning";
 import Button from "./ui/Button";
@@ -7,8 +7,33 @@ import Card from "./ui/Card";
 
 export default function CashFlowForecast({ state, onUpdateOccurrence }) {
   const [accountId, setAccountId] = useState(state.accounts[0]?.id ?? "");
+  const [scenarioType, setScenarioType] = useState("expense");
+  const [scenarioAmount, setScenarioAmount] = useState("");
+  const [scenarioDate, setScenarioDate] = useState(localDate());
   const timeline = useMemo(() => getScheduleTimeline(state, localDate(), 45), [state]);
   const forecast = useMemo(() => getProjectedCashFlow(state, accountId, localDate(), 45), [state, accountId]);
+  const modeledForecast = useMemo(() => {
+    const numericAmount = Number(scenarioAmount);
+    if (!numericAmount || !scenarioDate) return forecast;
+    let balance = forecast.opening;
+    let lowest = balance;
+    const events = [...forecast.events, {
+      id: "scenario",
+      description: scenarioType === "income" ? "What-if income" : "What-if expense",
+      date: scenarioDate,
+      amount: scenarioType === "income" ? Math.abs(numericAmount) : -Math.abs(numericAmount),
+      source: "scenario"
+    }].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).map((event) => {
+      balance += event.amount;
+      lowest = Math.min(lowest, balance);
+      return { ...event, balance };
+    });
+    return { ...forecast, events, lowest, closing: balance };
+  }, [forecast, scenarioAmount, scenarioDate, scenarioType]);
+  const nextIncome = modeledForecast.events.find(({ amount, date }) => amount > 0 && date >= localDate());
+  const beforeNextIncome = nextIncome
+    ? Math.min(modeledForecast.opening, ...modeledForecast.events.filter(({ date }) => date < nextIncome.date).map(({ balance }) => balance))
+    : modeledForecast.lowest;
   const active = timeline.filter(({ status }) => !["paid", "received", "skipped"].includes(status)).slice(0, 8);
   const input = "min-h-10 rounded-xl border border-black/8 bg-white px-3 text-xs font-semibold outline-none focus:border-forest-700/30";
 
@@ -21,16 +46,26 @@ export default function CashFlowForecast({ state, onUpdateOccurrence }) {
             {state.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
           </select>
         </div>
-        <div className="grid grid-cols-3 gap-2 p-4 sm:p-5">
-          <Metric label="Today" value={formatMoney(forecast.opening, state.currency)} />
-          <Metric label="Lowest" value={formatMoney(forecast.lowest, state.currency)} tone={forecast.lowest < 0 ? "negative" : "default"} />
-          <Metric label="In 45 days" value={formatMoney(forecast.closing, state.currency)} tone={forecast.closing >= forecast.opening ? "positive" : "negative"} />
+        <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4 sm:p-5">
+          <Metric label="Today" value={formatMoney(modeledForecast.opening, state.currency)} />
+          <Metric label="Before next income" value={formatMoney(beforeNextIncome, state.currency)} tone={beforeNextIncome < 0 ? "negative" : "default"} />
+          <Metric label="Lowest" value={formatMoney(modeledForecast.lowest, state.currency)} tone={modeledForecast.lowest < 0 ? "negative" : "default"} />
+          <Metric label="In 45 days" value={formatMoney(modeledForecast.closing, state.currency)} tone={modeledForecast.closing >= modeledForecast.opening ? "positive" : "negative"} />
         </div>
-        {forecast.events.length ? (
+        <div className="border-t border-black/5 bg-blue-50/50 p-4 sm:p-5">
+          <div className="flex items-center gap-2"><FlaskConical className="size-4 text-blue-700" /><strong className="text-xs text-blue-950">Try a what-if scenario</strong></div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <select value={scenarioType} onChange={(event) => setScenarioType(event.target.value)} className={input} aria-label="Scenario type"><option value="expense">Extra expense</option><option value="income">Extra income</option></select>
+            <input value={scenarioAmount} onChange={(event) => setScenarioAmount(event.target.value)} className={input} type="number" min="0" step="0.01" placeholder="Amount" aria-label="Scenario amount" />
+            <input value={scenarioDate} onChange={(event) => setScenarioDate(event.target.value)} className={input} type="date" aria-label="Scenario date" />
+          </div>
+          <p className="mt-2 text-[10px] text-blue-800/65">This is a temporary preview. It does not change your budget.</p>
+        </div>
+        {modeledForecast.events.length ? (
           <div className="border-t border-black/5">
-            {forecast.events.slice(0, 10).map((event) => (
-              <article key={event.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-black/[0.045] px-5 py-3 last:border-b-0">
-                <div className="min-w-0"><strong className="block truncate text-xs">{event.description}</strong><span className="mt-0.5 block text-[9px] text-slate-400">{event.date} · {event.source === "schedule" ? "Scheduled" : "Future transaction"}</span></div>
+            {modeledForecast.events.slice(0, 10).map((event) => (
+              <article key={event.id} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-black/[0.045] px-5 py-3 last:border-b-0 ${event.source === "scenario" ? "bg-blue-50/60" : ""}`}>
+                <div className="min-w-0"><strong className="block truncate text-xs">{event.description}</strong><span className="mt-0.5 block text-[9px] text-slate-400">{event.date} · {event.source === "schedule" ? "Scheduled" : event.source === "scenario" ? "What-if only" : "Future transaction"}</span></div>
                 <div className="text-right"><strong className={`block text-xs ${event.amount >= 0 ? "text-emerald-700" : ""}`}>{event.amount >= 0 ? "+" : "−"}{formatMoney(Math.abs(event.amount), state.currency)}</strong><span className="mt-0.5 block text-[9px] text-slate-400">{formatMoney(event.balance, state.currency)} after</span></div>
               </article>
             ))}

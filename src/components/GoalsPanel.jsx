@@ -1,4 +1,4 @@
-import { CalendarCheck2, LockKeyhole, Pencil, Plus, ShieldAlert, Target, Trash2 } from "lucide-react";
+import { CalendarCheck2, Landmark, LockKeyhole, Pencil, Plus, Repeat2, ShieldAlert, Target, Trash2 } from "lucide-react";
 import { formatMoney, sum } from "../lib/budget";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
@@ -7,7 +7,7 @@ function dateLabel(value) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(`${value}T12:00:00`));
 }
 
-export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, onDelete, onRemoveContribution, profileType = "personal" }) {
+export default function GoalsPanel({ goals, accounts = [], currency, onAdd, onAssign, onEdit, onDelete, onRemoveContribution, profileType = "personal" }) {
   const assignedThisMonth = sum(goals.map((goal) => goal.assignedThisMonth));
   const business = profileType === "business";
 
@@ -44,6 +44,10 @@ export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, o
                 <span className="font-bold text-forest-700">{Math.round(goal.percent)}% funded</span>
                 <span className="text-slate-400">{formatMoney(goal.remaining, currency)} to go</span>
               </div>
+              {(goal.accountId || goal.autoContribution) && <div className="mt-3 grid gap-1.5 rounded-xl bg-white p-3 text-[10px] text-slate-500">
+                {goal.accountId && <span className="flex items-center gap-2"><Landmark className="size-3.5 text-blue-600" /> Held in <strong>{accounts.find(({ id }) => id === goal.accountId)?.name ?? "linked account"}</strong></span>}
+                {goal.autoContribution && <span className="flex items-center gap-2"><Repeat2 className="size-3.5 text-violet-600" /> Plan {formatMoney(goal.autoContribution.amount, currency)} <strong className="capitalize">{goal.autoContribution.frequency}</strong> from {goal.autoContribution.startDate}</span>}
+              </div>}
               {(goal.targetDate || goal.deadline) && (
                 <div className="mt-4 grid gap-2 border-t border-black/5 pt-3">
                   {goal.targetDate && (
@@ -68,11 +72,11 @@ export default function GoalsPanel({ goals, currency, onAdd, onAssign, onEdit, o
                 </div>
               )}
               <button onClick={() => onAssign(goal)} className="interactive-button mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-forest-700/15 bg-white py-2 text-[11px] font-bold text-forest-700 hover:-translate-y-px hover:bg-forest-50">
-                <LockKeyhole className="size-3.5" /> Assign funds
+                <LockKeyhole className="size-3.5" /> Manage funds
               </button>
               {goal.contributions?.length > 0 && (
                 <details className="mt-3 border-t border-black/5 pt-3">
-                  <summary className="cursor-pointer text-[10px] font-bold text-slate-500">Assignment history ({goal.contributions.length})</summary>
+                  <summary className="cursor-pointer text-[10px] font-bold text-slate-500">Goal activity ({goal.contributions.length})</summary>
                   <div className="mt-2 grid gap-1.5">
                     {[...goal.contributions].sort((a, b) => b.date.localeCompare(a.date)).map((contribution) => (
                       <div key={contribution.id} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2 text-[10px]">

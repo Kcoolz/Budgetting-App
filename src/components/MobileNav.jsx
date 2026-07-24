@@ -34,7 +34,7 @@ export default function MobileNav({ profileType = "personal" }) {
     <>
       {moreOpen && (
         <div className="fixed inset-0 z-[29] bg-forest-950/25 backdrop-blur-[2px] lg:hidden" onClick={() => setMoreOpen(false)}>
-          <div className="absolute bottom-[calc(64px+env(safe-area-inset-bottom))] left-3 right-3 rounded-2xl border border-black/5 bg-white p-3 shadow-2xl" onClick={(event) => event.stopPropagation()} role="menu" aria-label="More navigation">
+          <div className="app-popover absolute bottom-[calc(64px+env(safe-area-inset-bottom))] left-3 right-3 rounded-2xl border border-black/5 bg-white p-3 shadow-2xl" onClick={(event) => event.stopPropagation()} role="menu" aria-label="More navigation">
             <div className="grid grid-cols-2 gap-2">
               {moreNavigation.map(({ label, to, icon: Icon }) => (
                 <NavLink key={to} to={to} className={({ isActive }) => `interactive-button flex min-h-14 items-center gap-3 rounded-xl px-3 text-xs font-bold ${isActive ? "bg-forest-50 text-forest-800" : "bg-slate-50 text-slate-600"}`} role="menuitem">
@@ -46,7 +46,7 @@ export default function MobileNav({ profileType = "personal" }) {
         </div>
       )}
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-black/5 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_30px_rgba(24,49,46,0.08)] backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">
+      <nav className="app-mobile-nav fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-black/5 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-8px_30px_rgba(24,49,46,0.08)] backdrop-blur-xl lg:hidden" aria-label="Mobile navigation">
         {primaryNavigation.map(({ label, to, icon: Icon, end }) => (
           <NavLink key={label} to={to} end={end} className={({ isActive }) => navClass(isActive)}>
             <Icon className="size-[18px]" strokeWidth={1.8} />

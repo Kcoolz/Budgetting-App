@@ -58,7 +58,7 @@ export default function ProfileMenu({ profiles, activeProfile, onSwitch, onManag
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-64 overflow-hidden rounded-2xl border border-black/5 bg-white p-2 shadow-[0_18px_55px_rgba(11,31,58,0.16)]" role="menu">
+        <div className="app-popover absolute right-0 top-[calc(100%+8px)] z-40 w-64 overflow-hidden rounded-2xl border border-black/5 bg-white p-2 shadow-[0_18px_55px_rgba(11,31,58,0.16)]" role="menu">
           <div className="flex items-center gap-2 px-2 pb-2 pt-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
             <UsersRound className="size-3.5" /> Profiles
           </div>

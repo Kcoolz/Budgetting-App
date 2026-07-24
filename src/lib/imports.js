@@ -6,6 +6,22 @@ export function parseTransactionFile(fileName, text, profileType = "personal") {
     ? parseOfx(text)
     : parseCsv(text);
 
+  return toBudgetTransactions(rows, profileType);
+}
+
+export function inspectCsv(text) {
+  const rows = readCsvRows(text).filter((row) => row.some((cell) => cell.trim()));
+  if (rows.length < 2) throw new Error("The CSV file does not contain transaction rows.");
+  return { headers: rows[0].map((header, index) => header.trim() || `Column ${index + 1}`), sample: rows.slice(1, 5) };
+}
+
+export function parseTransactionFileWithMapping(text, mapping, profileType = "personal") {
+  const rows = readCsvRows(text).filter((row) => row.some((cell) => cell.trim()));
+  const parsed = parseMappedCsv(rows, mapping);
+  return toBudgetTransactions(parsed, profileType);
+}
+
+function toBudgetTransactions(rows, profileType) {
   return rows.map((row) => {
     const category = guessCategory(row.description, profileType);
     return {
@@ -85,6 +101,30 @@ function parseCsv(text) {
     transactions.push({ date, description: description.slice(0, 80), amount });
   }
   if (!transactions.length) throw new Error("No valid transactions were found in the CSV file.");
+  return transactions;
+}
+
+function parseMappedCsv(rows, mapping) {
+  const columnIndex = (value) => value === "" || value === null || value === undefined ? -1 : Number(value);
+  const dateIndex = columnIndex(mapping.date);
+  const descriptionIndex = columnIndex(mapping.description);
+  const amountIndex = columnIndex(mapping.amount);
+  const debitIndex = columnIndex(mapping.debit);
+  const creditIndex = columnIndex(mapping.credit);
+  if (dateIndex < 0 || descriptionIndex < 0 || (amountIndex < 0 && debitIndex < 0 && creditIndex < 0)) throw new Error("Choose date, description, and amount—or debit/credit—columns.");
+  const transactions = [];
+  for (const row of rows.slice(1)) {
+    const date = normalizeDate(row[dateIndex]);
+    const description = String(row[descriptionIndex] ?? "").trim();
+    let amount = amountIndex >= 0 ? parseMoney(row[amountIndex]) : NaN;
+    if (amountIndex < 0) {
+      const debit = debitIndex >= 0 ? Math.abs(parseMoney(row[debitIndex]) || 0) : 0;
+      const credit = creditIndex >= 0 ? Math.abs(parseMoney(row[creditIndex]) || 0) : 0;
+      amount = credit > 0 ? credit : debit > 0 ? -debit : NaN;
+    }
+    if (date && description && Number.isFinite(amount) && amount !== 0) transactions.push({ date, description: description.slice(0, 80), amount });
+  }
+  if (!transactions.length) throw new Error("No valid transactions were found with that column mapping.");
   return transactions;
 }
 

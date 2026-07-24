@@ -28,6 +28,29 @@ export function applyTransactionRules(transaction, rules = []) {
   }, { ...transaction });
 }
 
+export function ruleMatchesTransaction(transaction, rule) {
+  if (rule.active === false || (rule.type !== "any" && rule.type !== transaction.type)) return false;
+  const source = String(transaction.description ?? "").toLowerCase();
+  const match = String(rule.match ?? "").toLowerCase();
+  return rule.operator === "equals" ? source === match : source.includes(match);
+}
+
+export function matchTransactionToSchedule(transaction, schedules = []) {
+  const candidate = schedules.find((schedule) => {
+    if (schedule.active === false || (schedule.type ?? "expense") !== transaction.type) return false;
+    const amountDifference = Math.abs(Number(schedule.amount) - Number(transaction.amount));
+    const amountTolerance = Math.max(Number(schedule.amount) * 0.08, 2);
+    const nameA = normalizeMerchant(schedule.description);
+    const nameB = normalizeMerchant(transaction.description);
+    const nameMatches = nameA && nameB && (nameA.includes(nameB) || nameB.includes(nameA));
+    return nameMatches && amountDifference <= amountTolerance;
+  });
+  if (!candidate) return transaction;
+  const occurrence = getUpcomingBills([candidate], new Date(`${addDays(transaction.date, -4)}T12:00:00`), 9)
+    .find(({ dueDate }) => Math.abs(daysBetween(dueDate, transaction.date)) <= 4);
+  return occurrence ? { ...transaction, recurringId: candidate.id, recurringOccurrenceId: occurrence.occurrenceId } : transaction;
+}
+
 export function suggestRecurringSchedules(transactions = [], existingSchedules = []) {
   const groups = new Map();
   for (const transaction of transactions) {

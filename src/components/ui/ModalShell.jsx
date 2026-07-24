@@ -3,11 +3,17 @@ import { X } from "lucide-react";
 
 export default function ModalShell({ open, onClose, eyebrow, title, children, width = "max-w-xl" }) {
   const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef(null);
+  const wasOpenRef = useRef(false);
   const titleId = useId();
+  onCloseRef.current = onClose;
+  if (open && !wasOpenRef.current && typeof document !== "undefined") previousFocusRef.current = document.activeElement;
+  wasOpenRef.current = open;
 
   useEffect(() => {
     if (!open) return undefined;
-    const previousFocus = document.activeElement;
+    const previousFocus = previousFocusRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -18,7 +24,7 @@ export default function ModalShell({ open, onClose, eyebrow, title, children, wi
     const handleKey = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -43,9 +49,13 @@ export default function ModalShell({ open, onClose, eyebrow, title, children, wi
       cancelAnimationFrame(focusDialog);
       window.removeEventListener("keydown", handleKey);
       document.body.style.overflow = previousOverflow;
-      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+      if (previousFocus instanceof HTMLElement) {
+        requestAnimationFrame(() => {
+          if (previousFocus.isConnected && !document.querySelector('[role="dialog"][aria-modal="true"]')) previousFocus.focus();
+        });
+      }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -55,7 +65,7 @@ export default function ModalShell({ open, onClose, eyebrow, title, children, wi
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
       role="presentation"
     >
-      <section ref={dialogRef} tabIndex="-1" className={`premium-card my-auto max-h-[calc(100vh-24px)] w-full overflow-y-auto rounded-3xl bg-white shadow-2xl ${width}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <section ref={dialogRef} tabIndex="-1" className={`app-dialog premium-card my-auto max-h-[calc(100vh-24px)] w-full overflow-y-auto rounded-3xl bg-white shadow-2xl ${width}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="flex items-start justify-between gap-6 px-5 pb-0 pt-6 sm:px-7 sm:pt-7">
           <div>
             <p className="eyebrow">{eyebrow}</p>

@@ -146,7 +146,7 @@ export function normalizeDashboard(value) {
 
 export function createInitialState(profileType = "personal") {
   return {
-    version: 5,
+    version: 6,
     currency: "CAD",
     budgets: Object.fromEntries(EXPENSE_CATEGORIES.map(({ id }) => [id, 0])),
     monthlyBudgets: {},
@@ -157,6 +157,8 @@ export function createInitialState(profileType = "personal") {
     rules: [],
     reconciliations: [],
     scheduleStatuses: {},
+    importHistory: [],
+    lastBackupAt: null,
     accounts: [createDefaultAccount(profileType)],
     transfers: [],
     transactions: [],
@@ -226,6 +228,8 @@ export function normalizeState(value, profileType = "personal") {
         target: Number(goal.target),
         targetDate: normalizeOptionalDate(goal.targetDate),
         deadline: normalizeOptionalDate(goal.deadline),
+        accountId: accounts.some(({ id }) => id === goal.accountId) ? goal.accountId : null,
+        autoContribution: normalizeAutoContribution(goal.autoContribution),
         contributions: Array.isArray(goal.contributions)
           ? goal.contributions.filter(isValidContribution).map((contribution) => ({
               ...contribution,
@@ -265,7 +269,7 @@ export function normalizeState(value, profileType = "personal") {
       : null;
 
   return {
-    version: 5,
+    version: 6,
     currency: allowedCurrencies.has(value.currency) ? value.currency : initial.currency,
     budgets,
     monthlyBudgets,
@@ -276,6 +280,8 @@ export function normalizeState(value, profileType = "personal") {
     rules: normalizeRules(value.rules),
     reconciliations: normalizeReconciliations(value.reconciliations, accounts),
     scheduleStatuses: normalizeScheduleStatuses(value.scheduleStatuses),
+    importHistory: normalizeImportHistory(value.importHistory),
+    lastBackupAt: typeof value.lastBackupAt === "string" ? value.lastBackupAt : null,
     accounts,
     transfers,
     transactions,
@@ -390,6 +396,32 @@ function normalizeScheduleStatuses(value) {
   }]));
 }
 
+function normalizeImportHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => (
+    typeof item?.id === "string" &&
+    typeof item.fileName === "string" &&
+    isValidDateString(item.date) &&
+    Number.isFinite(Number(item.count))
+  )).map((item) => ({
+    id: item.id,
+    fileName: item.fileName.slice(0, 120),
+    date: item.date,
+    count: Math.max(0, Number(item.count)),
+    accountId: typeof item.accountId === "string" ? item.accountId : null
+  })).slice(-25);
+}
+
+function normalizeAutoContribution(value) {
+  if (!value || !Number.isFinite(Number(value.amount)) || Number(value.amount) <= 0) return null;
+  return {
+    amount: Number(value.amount),
+    frequency: ["weekly", "biweekly", "monthly", "yearly"].includes(value.frequency) ? value.frequency : "monthly",
+    startDate: isValidDateString(value.startDate) ? value.startDate : localDate(),
+    active: value.active !== false
+  };
+}
+
 function normalizeTransactionSplits(value, total) {
   if (!Array.isArray(value) || value.length < 2) return [];
   const splits = value.filter((split) => (
@@ -452,7 +484,7 @@ function isValidContribution(contribution) {
       typeof contribution.id === "string" &&
       isValidDateString(contribution.date) &&
       Number.isFinite(Number(contribution.amount)) &&
-      Number(contribution.amount) > 0
+      Number(contribution.amount) !== 0
   );
 }
 

@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 import { createInitialState, guessSubcategory, localDate, normalizeDashboard, normalizeState } from "../lib/budget";
 import { getAccountBalances } from "../lib/accounts";
-import { applyTransactionRules } from "../lib/planning";
+import { applyTransactionRules, matchTransactionToSchedule, ruleMatchesTransaction } from "../lib/planning";
 import { createProfileRecord, normalizeProfileStore } from "../lib/profiles";
+import { loadProfileStoreFromIndexedDb, saveProfileStoreToIndexedDb } from "../lib/storage";
 
 const STORAGE_KEY = "cloud-budget-v1";
 const LEGACY_STORAGE_KEY = "sprout-budget-v1";
 const PROFILES_STORAGE_KEY = "cloud-budget-profiles-v1";
+let loadedExistingBrowserState = false;
 
 function loadProfileState() {
   try {
     const savedProfiles = localStorage.getItem(PROFILES_STORAGE_KEY);
-    if (savedProfiles) return normalizeProfileStore(JSON.parse(savedProfiles));
+    if (savedProfiles) {
+      loadedExistingBrowserState = true;
+      return normalizeProfileStore(JSON.parse(savedProfiles));
+    }
     const savedState = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (savedState) loadedExistingBrowserState = true;
     const budget = savedState ? normalizeState(JSON.parse(savedState)) : createInitialState();
     return normalizeProfileStore(null, budget);
   } catch {
@@ -23,17 +29,34 @@ function loadProfileState() {
 export function useBudgetStore() {
   const [profileState, setProfileState] = useState(loadProfileState);
   const [storageError, setStorageError] = useState("");
+  const [indexedDbReady, setIndexedDbReady] = useState(loadedExistingBrowserState);
   const activeProfile = profileState.profiles.find(({ id }) => id === profileState.activeProfileId) ?? profileState.profiles[0];
   const state = activeProfile.budget;
 
   useEffect(() => {
+    if (indexedDbReady) return undefined;
+    let cancelled = false;
+    loadProfileStoreFromIndexedDb()
+      .then((stored) => {
+        if (!cancelled && stored) setProfileState(normalizeProfileStore(stored));
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setIndexedDbReady(true); });
+    return () => { cancelled = true; };
+  }, [indexedDbReady]);
+
+  useEffect(() => {
+    if (!indexedDbReady) return;
     try {
       localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profileState));
+      saveProfileStoreToIndexedDb(profileState).catch(() => {
+        setStorageError("Cloud saved a compact browser copy, but its larger local database could not be updated. Download a backup before importing more data.");
+      });
       setStorageError("");
     } catch {
       setStorageError("Cloud could not save to this browser. Export a backup now; recent changes may exist only until this tab closes.");
     }
-  }, [profileState]);
+  }, [profileState, indexedDbReady]);
 
   useEffect(() => {
     const synchronizeTabs = (event) => {
@@ -103,6 +126,34 @@ export function useBudgetStore() {
     }));
   };
 
+  const restoreTransactions = (transactions) => {
+    setState((current) => ({
+      ...current,
+      transactions: [
+        ...current.transactions.filter((item) => !transactions.some(({ id }) => id === item.id)),
+        ...transactions
+      ]
+    }));
+  };
+
+  const bulkUpdateTransactions = (ids, changes) => {
+    const selected = new Set(ids);
+    setState((current) => ({
+      ...current,
+      transactions: current.transactions.map((transaction) => selected.has(transaction.id)
+        ? {
+            ...transaction,
+            ...(typeof changes === "function" ? changes(transaction) : changes)
+          }
+        : transaction)
+    }));
+  };
+
+  const bulkDeleteTransactions = (ids) => {
+    const selected = new Set(ids);
+    setState((current) => ({ ...current, transactions: current.transactions.filter(({ id }) => !selected.has(id)) }));
+  };
+
   const updateTransaction = (transaction) => {
     setState((current) => ({
       ...current,
@@ -120,22 +171,44 @@ export function useBudgetStore() {
     }));
   };
 
-  const importTransactions = (transactions) => {
-    setState((current) => ({
-      ...current,
-      transactions: [
-        ...current.transactions,
-        ...transactions.map((transaction) => ({
-          ...applyTransactionRules(transaction, current.rules),
+  const importTransactions = (transactions, metadata = {}) => {
+    const batchId = createId();
+    setState((current) => {
+      const imported = transactions.map((transaction) => {
+        const ruled = applyTransactionRules(transaction, current.rules);
+        const matched = matchTransactionToSchedule(ruled, current.recurringBills);
+        return {
+          ...matched,
           id: createId(),
+          importBatchId: batchId,
           amount: Number(transaction.amount),
           accountId: current.accounts.some(({ id }) => id === transaction.accountId)
             ? transaction.accountId
             : current.accounts[0].id,
           reviewed: false,
           cleared: transaction.cleared !== false
-        }))
-      ]
+        };
+      });
+      return {
+        ...current,
+        transactions: [...current.transactions, ...imported],
+        importHistory: [...(current.importHistory ?? []), {
+          id: batchId,
+          fileName: metadata.fileName || "Imported transactions",
+          date: localDate(),
+          count: imported.length,
+          accountId: imported[0]?.accountId ?? null
+        }].slice(-25)
+      };
+    });
+    return batchId;
+  };
+
+  const undoImport = (batchId) => {
+    setState((current) => ({
+      ...current,
+      transactions: current.transactions.filter((transaction) => transaction.importBatchId !== batchId),
+      importHistory: (current.importHistory ?? []).filter((item) => item.id !== batchId)
     }));
   };
 
@@ -282,6 +355,42 @@ export function useBudgetStore() {
     }, activeProfile.type));
   };
 
+  const moveCustomCategory = (id, direction) => {
+    setState((current) => {
+      const categories = [...current.customCategories];
+      const index = categories.findIndex((category) => category.id === id);
+      const nextIndex = Math.max(0, Math.min(categories.length - 1, index + direction));
+      if (index < 0 || index === nextIndex) return current;
+      [categories[index], categories[nextIndex]] = [categories[nextIndex], categories[index]];
+      return { ...current, customCategories: categories };
+    });
+  };
+
+  const mergeCustomCategory = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    setState((current) => {
+      const replaceBudget = (plan = {}) => ({
+        ...plan,
+        [targetId]: Number(plan[targetId] || 0) + Number(plan[sourceId] || 0),
+        [sourceId]: 0
+      });
+      return normalizeState({
+        ...current,
+        budgets: replaceBudget(current.budgets),
+        monthlyBudgets: Object.fromEntries(Object.entries(current.monthlyBudgets).map(([month, plan]) => [month, replaceBudget(plan)])),
+        customCategories: current.customCategories.map((category) => category.id === sourceId ? { ...category, archived: true } : category),
+        customSubcategories: current.customSubcategories.map((detail) => detail.category === sourceId ? { ...detail, category: targetId } : detail),
+        transactions: current.transactions.map((transaction) => ({
+          ...transaction,
+          category: transaction.category === sourceId ? targetId : transaction.category,
+          splits: (transaction.splits ?? []).map((split) => split.category === sourceId ? { ...split, category: targetId } : split)
+        })),
+        recurringBills: current.recurringBills.map((schedule) => schedule.category === sourceId ? { ...schedule, category: targetId } : schedule),
+        rules: current.rules.map((rule) => rule.category === sourceId ? { ...rule, category: targetId } : rule)
+      }, activeProfile.type);
+    });
+  };
+
   const saveCustomSubcategory = (subcategory) => {
     setState((current) => {
       const saved = {
@@ -320,14 +429,28 @@ export function useBudgetStore() {
     }));
   };
 
-  const saveRule = (rule) => {
+  const saveRule = (rule, applyExisting = false) => {
     setState((current) => {
       const saved = { ...rule, id: rule.id ?? createId(), active: rule.active !== false };
       const exists = current.rules.some(({ id }) => id === saved.id);
-      return normalizeState({
+      const next = normalizeState({
         ...current,
         rules: exists ? current.rules.map((item) => item.id === saved.id ? saved : item) : [...current.rules, saved]
       }, activeProfile.type);
+      return applyExisting
+        ? { ...next, transactions: next.transactions.map((transaction) => ruleMatchesTransaction(transaction, saved) ? applyTransactionRules(transaction, [saved]) : transaction) }
+        : next;
+    });
+  };
+
+  const moveRule = (id, direction) => {
+    setState((current) => {
+      const rules = [...current.rules];
+      const index = rules.findIndex((rule) => rule.id === id);
+      const nextIndex = Math.max(0, Math.min(rules.length - 1, index + direction));
+      if (index < 0 || nextIndex === index) return current;
+      [rules[index], rules[nextIndex]] = [rules[nextIndex], rules[index]];
+      return { ...current, rules };
     });
   };
 
@@ -434,6 +557,13 @@ export function useBudgetStore() {
         target: Number(goal.target),
         targetDate: goal.targetDate || null,
         deadline: goal.deadline || null,
+        accountId: current.accounts.some(({ id }) => id === goal.accountId) ? goal.accountId : null,
+        autoContribution: goal.autoContribution?.amount ? {
+          amount: Number(goal.autoContribution.amount),
+          frequency: goal.autoContribution.frequency,
+          startDate: goal.autoContribution.startDate,
+          active: goal.autoContribution.active !== false
+        } : null,
         contributions: existing?.contributions ?? []
       };
       return {
@@ -461,6 +591,39 @@ export function useBudgetStore() {
           : goal
       )
     }));
+  };
+
+  const restoreGoal = (goal) => {
+    setState((current) => ({
+      ...current,
+      goals: [...current.goals.filter(({ id }) => id !== goal.id), goal]
+    }));
+  };
+
+  const restoreGoalContribution = (goalId, contribution) => {
+    setState((current) => ({
+      ...current,
+      goals: current.goals.map((goal) => goal.id === goalId
+        ? { ...goal, contributions: [...goal.contributions.filter(({ id }) => id !== contribution.id), contribution] }
+        : goal)
+    }));
+  };
+
+  const transferGoalFunds = (fromGoalId, toGoalId, amount, date) => {
+    const numericAmount = Math.abs(Number(amount));
+    if (!numericAmount || fromGoalId === toGoalId) return;
+    setState((current) => ({
+      ...current,
+      goals: current.goals.map((goal) => {
+        if (goal.id === fromGoalId) return { ...goal, contributions: [...goal.contributions, { id: createId(), amount: -numericAmount, date, transferGoalId: toGoalId }] };
+        if (goal.id === toGoalId) return { ...goal, contributions: [...goal.contributions, { id: createId(), amount: numericAmount, date, transferGoalId: fromGoalId }] };
+        return goal;
+      })
+    }));
+  };
+
+  const markBackupCreated = () => {
+    setState((current) => ({ ...current, lastBackupAt: new Date().toISOString() }));
   };
 
   const removeGoalContribution = (goalId, contributionId) => {
@@ -560,6 +723,7 @@ export function useBudgetStore() {
 
   return {
     state,
+    dataReady: indexedDbReady,
     profileBackup: profileState,
     storageError,
     profiles: profileState.profiles,
@@ -571,17 +735,24 @@ export function useBudgetStore() {
     addTransaction,
     updateTransaction,
     importTransactions,
+    undoImport,
     deleteTransaction,
+    restoreTransactions,
+    bulkUpdateTransactions,
+    bulkDeleteTransactions,
     reviewTransaction,
     updateTransactionCategory,
     updateTransactionSubcategory,
     saveCustomCategory,
     toggleCustomCategory,
+    moveCustomCategory,
+    mergeCustomCategory,
     saveCustomSubcategory,
     saveTag,
     deleteTag,
     saveRule,
     toggleRule,
+    moveRule,
     deleteRule,
     saveAccount,
     deleteAccount,
@@ -594,7 +765,10 @@ export function useBudgetStore() {
     saveReconciliation,
     saveGoal,
     deleteGoal,
+    restoreGoal,
     assignToGoal,
+    restoreGoalContribution,
+    transferGoalFunds,
     removeGoalContribution,
     updateDashboard,
     saveDebt,
@@ -602,7 +776,8 @@ export function useBudgetStore() {
     updateDebtPlan,
     updateBudget,
     importState,
-    importProfileStore
+    importProfileStore,
+    markBackupCreated
   };
 }
 

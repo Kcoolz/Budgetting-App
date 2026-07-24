@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { Archive, Check, Plus, RotateCcw, Sparkles, Tag, Trash2, WandSparkles } from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, Check, Combine, Pencil, Plus, RotateCcw, Sparkles, Tag, Trash2, WandSparkles } from "lucide-react";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import PageIntro from "../components/PageIntro";
 import { expenseCategoriesFor, expenseSubcategoriesFor } from "../lib/budget";
-import { suggestRecurringSchedules } from "../lib/planning";
+import { ruleMatchesTransaction, suggestRecurringSchedules } from "../lib/planning";
 
 const COLORS = ["#3478b8", "#4f8b71", "#c8834f", "#9a6ca8", "#cb6671", "#64748b"];
 const input = "min-h-10 w-full rounded-xl border border-black/8 bg-white px-3 text-xs outline-none focus:border-forest-700/30 focus:ring-4 focus:ring-forest-700/10";
@@ -14,16 +14,20 @@ export default function OrganizePage({
   profileType = "personal",
   onSaveCategory,
   onToggleCategory,
+  onMoveCategory,
+  onMergeCategory,
   onSaveSubcategory,
   onSaveTag,
   onDeleteTag,
   onSaveRule,
   onToggleRule,
+  onMoveRule,
   onDeleteRule,
   onAcceptSuggestion
 }) {
   const categories = expenseCategoriesFor(profileType, state);
-  const allCategories = [...(profileType === "business" ? categories.slice(0, 8) : categories.slice(0, 8)), ...state.customCategories];
+  const customCategoryIds = new Set(state.customCategories.map(({ id }) => id));
+  const allCategories = [...categories.filter(({ id }) => !customCategoryIds.has(id)), ...state.customCategories];
   const subcategories = expenseSubcategoriesFor(profileType, state);
   const suggestions = useMemo(
     () => suggestRecurringSchedules(state.transactions, state.recurringBills),
@@ -31,16 +35,22 @@ export default function OrganizePage({
   );
   const [categoryName, setCategoryName] = useState("");
   const [categoryColor, setCategoryColor] = useState(COLORS[0]);
+  const [editingCategoryId, setEditingCategoryId] = useState("");
+  const [mergeTargets, setMergeTargets] = useState({});
   const [detailName, setDetailName] = useState("");
   const [detailCategory, setDetailCategory] = useState(categories[0]?.id ?? "other");
   const [tagName, setTagName] = useState("");
   const [rule, setRule] = useState({ name: "", match: "", operator: "contains", type: "any", category: "", subcategory: "", rename: "", tag: "" });
+  const [editingRuleId, setEditingRuleId] = useState("");
+  const [applyExisting, setApplyExisting] = useState(false);
 
   const submitCategory = (event) => {
     event.preventDefault();
     if (!categoryName.trim()) return;
-    onSaveCategory({ name: categoryName, shortName: categoryName, color: categoryColor });
+    onSaveCategory({ id: editingCategoryId || undefined, name: categoryName, shortName: categoryName, color: categoryColor });
     setCategoryName("");
+    setCategoryColor(COLORS[0]);
+    setEditingCategoryId("");
   };
 
   const submitDetail = (event) => {
@@ -61,6 +71,7 @@ export default function OrganizePage({
     event.preventDefault();
     if (!rule.match.trim()) return;
     onSaveRule({
+      id: editingRuleId || undefined,
       name: rule.name.trim() || `When description contains ${rule.match.trim()}`,
       match: rule.match,
       operator: rule.operator,
@@ -69,11 +80,30 @@ export default function OrganizePage({
       subcategory: rule.subcategory,
       rename: rule.rename,
       tags: rule.tag ? [rule.tag] : []
-    });
+    }, applyExisting);
     setRule({ name: "", match: "", operator: "contains", type: "any", category: "", subcategory: "", rename: "", tag: "" });
+    setEditingRuleId("");
+    setApplyExisting(false);
   };
 
   const ruleSubcategories = subcategories.filter(({ category }) => category === rule.category);
+  const rulePreview = rule.match.trim()
+    ? state.transactions.filter((transaction) => ruleMatchesTransaction(transaction, rule)).length
+    : 0;
+
+  const editRule = (item) => {
+    setEditingRuleId(item.id);
+    setRule({
+      name: item.name ?? "",
+      match: item.match ?? "",
+      operator: item.operator ?? "contains",
+      type: item.type ?? "any",
+      category: item.category ?? "",
+      subcategory: item.subcategory ?? "",
+      rename: item.rename ?? "",
+      tag: item.tags?.[0] ?? ""
+    });
+  };
 
   return (
     <>
@@ -93,17 +123,29 @@ export default function OrganizePage({
           <form onSubmit={submitCategory} className="mt-5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_46px_auto]">
             <input value={categoryName} onChange={(event) => setCategoryName(event.target.value)} className={input} placeholder="New category name" maxLength="40" />
             <input value={categoryColor} onChange={(event) => setCategoryColor(event.target.value)} className="h-10 w-full cursor-pointer rounded-xl border border-black/8 bg-white p-1" type="color" aria-label="Category colour" />
-            <Button type="submit">Add category</Button>
+            <Button type="submit">{editingCategoryId ? "Save changes" : "Add category"}</Button>
           </form>
+          {editingCategoryId && <button type="button" onClick={() => { setEditingCategoryId(""); setCategoryName(""); setCategoryColor(COLORS[0]); }} className="mt-2 text-[10px] font-bold text-slate-500">Cancel editing</button>}
 
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-5 grid gap-2">
             {allCategories.map((category) => {
-              const custom = state.customCategories.some(({ id }) => id === category.id);
+              const customIndex = state.customCategories.findIndex(({ id }) => id === category.id);
+              const custom = customIndex >= 0;
               return (
-                <span key={category.id} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${category.archived ? "border-slate-200 bg-slate-50 text-slate-400" : "border-black/5 bg-white"}`}>
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: category.color }} />{category.name}
-                  {custom && <button type="button" onClick={() => onToggleCategory(category.id)} title={category.archived ? "Restore category" : "Archive category"} className="text-slate-400 hover:text-ink-900">{category.archived ? <RotateCcw className="size-3" /> : <Archive className="size-3" />}</button>}
-                </span>
+                <div key={category.id} className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold ${category.archived ? "border-slate-200 bg-slate-50 text-slate-400" : "border-black/5 bg-white"}`}>
+                  <span className="size-2.5 rounded-full" style={{ backgroundColor: category.color }} /><span className="min-w-28 flex-1">{category.name}</span>
+                  {custom && <>
+                    <button type="button" disabled={customIndex === 0} onClick={() => onMoveCategory(category.id, -1)} className="grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Move ${category.name} up`}><ArrowUp className="size-3" /></button>
+                    <button type="button" disabled={customIndex === state.customCategories.length - 1} onClick={() => onMoveCategory(category.id, 1)} className="grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Move ${category.name} down`}><ArrowDown className="size-3" /></button>
+                    <button type="button" onClick={() => { setEditingCategoryId(category.id); setCategoryName(category.name); setCategoryColor(category.color); }} className="grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-700" aria-label={`Edit ${category.name}`}><Pencil className="size-3" /></button>
+                    <select value={mergeTargets[category.id] ?? ""} onChange={(event) => setMergeTargets({ ...mergeTargets, [category.id]: event.target.value })} className="min-h-8 max-w-32 rounded-lg border border-black/8 bg-white px-2 text-[10px]" aria-label={`Merge ${category.name} into`}>
+                      <option value="">Merge into…</option>
+                      {allCategories.filter((target) => target.id !== category.id && !target.archived).map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}
+                    </select>
+                    <button type="button" disabled={!mergeTargets[category.id]} onClick={() => { onMergeCategory(category.id, mergeTargets[category.id]); setMergeTargets({ ...mergeTargets, [category.id]: "" }); }} className="grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-25" aria-label={`Merge ${category.name}`}><Combine className="size-3" /></button>
+                    <button type="button" onClick={() => onToggleCategory(category.id)} title={category.archived ? "Restore category" : "Archive category"} className="grid size-7 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-ink-900" aria-label={`${category.archived ? "Restore" : "Archive"} ${category.name}`}>{category.archived ? <RotateCcw className="size-3" /> : <Archive className="size-3" />}</button>
+                  </>}
+                </div>
               );
             })}
           </div>
@@ -151,16 +193,26 @@ export default function OrganizePage({
             <select value={rule.subcategory} onChange={(event) => setRule({ ...rule, subcategory: event.target.value })} disabled={!rule.category} className={input}><option value="">Keep spending detail</option>{ruleSubcategories.map((detail) => <option key={detail.id} value={detail.id}>{detail.name}</option>)}</select>
             <input value={rule.rename} onChange={(event) => setRule({ ...rule, rename: event.target.value })} className={input} placeholder="Rename to (optional)" />
             <select value={rule.tag} onChange={(event) => setRule({ ...rule, tag: event.target.value })} className={input}><option value="">No tag</option>{state.tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
-            <Button type="submit" variant="primary">Create rule</Button>
+            <Button type="submit" variant="primary">{editingRuleId ? "Save rule" : "Create rule"}</Button>
+            <label className="flex min-h-10 items-center gap-2 rounded-xl bg-slate-50 px-3 text-[10px] font-semibold text-slate-600 md:col-span-2">
+              <input type="checkbox" checked={applyExisting} onChange={(event) => setApplyExisting(event.target.checked)} className="size-4 rounded" />
+              Apply to {rulePreview} matching existing transaction{rulePreview === 1 ? "" : "s"}
+            </label>
+            {editingRuleId && <button type="button" onClick={() => { setEditingRuleId(""); setRule({ name: "", match: "", operator: "contains", type: "any", category: "", subcategory: "", rename: "", tag: "" }); setApplyExisting(false); }} className="min-h-10 text-left text-[10px] font-bold text-slate-500">Cancel editing</button>}
           </form>
         </div>
         {state.rules.length ? (
           <div>
-            {state.rules.map((item) => (
+            {state.rules.map((item, index) => (
               <article key={item.id} className="flex flex-col gap-3 border-b border-black/[0.045] px-5 py-4 last:border-b-0 sm:flex-row sm:items-center sm:px-6">
                 <button type="button" onClick={() => onToggleRule(item.id)} className={`grid size-7 shrink-0 place-items-center rounded-full ${item.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`} aria-label={item.active ? "Pause rule" : "Resume rule"}>{item.active && <Check className="size-3.5" />}</button>
                 <div className="min-w-0 flex-1"><strong className="block truncate text-xs">{item.name}</strong><span className="mt-1 block text-[10px] text-slate-400">{item.operator === "equals" ? "Description equals" : "Description contains"} “{item.match}”{item.category ? ` → ${categories.find(({ id }) => id === item.category)?.name ?? item.category}` : ""}{item.rename ? ` → rename “${item.rename}”` : ""}</span></div>
-                <button type="button" onClick={() => onDeleteRule(item.id)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${item.name}`}><Trash2 className="size-3.5" /></button>
+                <div className="flex gap-1">
+                  <button type="button" disabled={index === 0} onClick={() => onMoveRule(item.id, -1)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Move ${item.name} up`}><ArrowUp className="size-3.5" /></button>
+                  <button type="button" disabled={index === state.rules.length - 1} onClick={() => onMoveRule(item.id, 1)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 disabled:opacity-25" aria-label={`Move ${item.name} down`}><ArrowDown className="size-3.5" /></button>
+                  <button type="button" onClick={() => editRule(item)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-blue-50 hover:text-blue-700" aria-label={`Edit ${item.name}`}><Pencil className="size-3.5" /></button>
+                  <button type="button" onClick={() => onDeleteRule(item.id)} className="interactive-button grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label={`Delete ${item.name}`}><Trash2 className="size-3.5" /></button>
+                </div>
               </article>
             ))}
           </div>

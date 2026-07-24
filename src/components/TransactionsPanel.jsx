@@ -12,10 +12,11 @@ import {
 import Button from "./ui/Button";
 import Card from "./ui/Card";
 
-export default function TransactionsPanel({ transactions, accounts = [], currency, categories: providedCategories, subcategories: providedSubcategories, tags = [], quickValue, quickError, onQuickChange, onQuickAdd, onAdd, onEdit, onImport, onTransfer, onDelete, onReview, onCategoryChange, onSubcategoryChange, profileType = "personal" }) {
+export default function TransactionsPanel({ transactions, accounts = [], currency, categories: providedCategories, subcategories: providedSubcategories, tags = [], quickValue, quickError, onQuickChange, onQuickAdd, onAdd, onEdit, onImport, onTransfer, onDelete, onReview, onCategoryChange, onSubcategoryChange, onBulkUpdate, onBulkDelete, profileType = "personal" }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState([]);
   const unreviewed = transactions.filter((transaction) => transaction.reviewed === false);
   const business = profileType === "business";
   const accountNames = Object.fromEntries(accounts.map(({ id, name }) => [id, name]));
@@ -31,6 +32,19 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
     (!normalizedQuery || [transaction.description, accountNames[transaction.accountId], categoryLabel(transaction), ...(transaction.tags ?? []).map((id) => tagNames[id])]
       .some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery)))
   ));
+  const selectedSet = new Set(selectedIds);
+  const toggleSelected = (id) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const allVisibleSelected = visibleTransactions.length > 0 && visibleTransactions.every(({ id }) => selectedSet.has(id));
+  const toggleAllVisible = () => {
+    const visibleIds = new Set(visibleTransactions.map(({ id }) => id));
+    setSelectedIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.has(id))
+      : [...new Set([...current, ...visibleIds])]);
+  };
+  const runBulkUpdate = (changes) => {
+    onBulkUpdate(selectedIds, changes);
+    setSelectedIds([]);
+  };
 
   return (
     <Card id="transactions" className="overflow-hidden">
@@ -81,6 +95,18 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
           </label>
         </div>
 
+        {selectedIds.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
+            <strong className="mr-auto text-xs text-blue-900">{selectedIds.length} selected</strong>
+            <button type="button" onClick={() => runBulkUpdate({ reviewed: true })} className="min-h-8 rounded-lg bg-white px-2.5 text-[10px] font-bold text-blue-800">Approve</button>
+            <button type="button" onClick={() => runBulkUpdate({ cleared: true })} className="min-h-8 rounded-lg bg-white px-2.5 text-[10px] font-bold text-blue-800">Mark cleared</button>
+            <select defaultValue="" onChange={(event) => event.target.value && runBulkUpdate({ category: event.target.value })} className="min-h-8 rounded-lg border-0 bg-white px-2 text-[10px] font-bold text-blue-800"><option value="">Change category…</option>{expenseCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
+            {tags.length > 0 && <select defaultValue="" onChange={(event) => { const tagId = event.target.value; if (tagId) runBulkUpdate((transaction) => ({ tags: [...new Set([...(transaction.tags ?? []), tagId])] })); }} className="min-h-8 rounded-lg border-0 bg-white px-2 text-[10px] font-bold text-blue-800"><option value="">Add tag…</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>}
+            <button type="button" onClick={() => { onBulkDelete(selectedIds); setSelectedIds([]); }} className="min-h-8 rounded-lg bg-rose-100 px-2.5 text-[10px] font-bold text-rose-700">Delete</button>
+            <button type="button" onClick={() => setSelectedIds([])} className="min-h-8 rounded-lg px-2 text-[10px] font-bold text-blue-700">Cancel</button>
+          </div>
+        )}
+
         {unreviewed.length > 0 && (
           <div className="rounded-xl border border-orange-200/70 bg-orange-50/70">
             <button type="button" onClick={() => setReviewOpen((value) => !value)} className="interactive-button flex w-full items-center gap-3 px-4 py-3 text-left hover:-translate-y-px">
@@ -91,6 +117,10 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
 
             {reviewOpen && (
               <div className="grid gap-2 border-t border-orange-200/60 p-3">
+                <div className="flex items-center justify-between gap-3 px-1 pb-1">
+                  <span className="text-[10px] text-orange-800/70">Imported rules and schedule matches are shown before approval.</span>
+                  <button type="button" onClick={() => onBulkUpdate(unreviewed.map(({ id }) => id), { reviewed: true })} className="min-h-8 shrink-0 rounded-lg bg-orange-100 px-3 text-[10px] font-bold text-orange-800 hover:bg-orange-200">Approve all</button>
+                </div>
                 {unreviewed.map((transaction) => {
                   const categories = transaction.type === "income" ? incomeCategoriesFor(profileType) : expenseCategories;
                   const subcategories = expenseSubcategories.filter((item) => item.category === transaction.category);
@@ -98,6 +128,7 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
                     <article key={transaction.id} className="grid gap-2 rounded-xl bg-white p-3 shadow-sm sm:grid-cols-[minmax(0,1fr)_150px_150px_auto] sm:items-center">
                       <div className="min-w-0">
                         <strong className="block truncate text-xs">{transaction.description}</strong>
+                        {transaction.recurringId && <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-1 text-[9px] font-bold text-violet-700"><Repeat2 className="size-3" /> Matched to schedule</span>}
                         <span className="mt-0.5 block text-[10px] text-slate-400">{formatMoney(transaction.amount, currency)} on {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${transaction.date}T12:00:00`))} · {accountNames[transaction.accountId] ?? "Main account"}</span>
                       </div>
                       <select value={transaction.category} onChange={(event) => onCategoryChange(transaction.id, event.target.value)} className="min-h-9 rounded-lg border border-black/8 bg-white px-2 text-[11px] font-semibold outline-none focus:border-forest-700/30">
@@ -129,7 +160,7 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
       ) : (
         <div className="border-t border-black/5">
           <div className="hidden grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_68px] gap-4 px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 md:grid">
-            <span>Description</span><span>Category</span><span>Date</span><span className="text-right">Amount</span><span />
+            <span className="flex items-center gap-3"><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} className="size-4 accent-forest-800" aria-label={allVisibleSelected ? "Clear visible transaction selection" : "Select all visible transactions"} /> Description</span><span>Category</span><span>Date</span><span className="text-right">Amount</span><span />
           </div>
           {visibleTransactions.map((transaction) => {
             const income = transaction.type === "income";
@@ -137,6 +168,7 @@ export default function TransactionsPanel({ transactions, accounts = [], currenc
             return (
               <article key={transaction.id} className="group grid grid-cols-[minmax(0,1fr)_auto_68px] items-center gap-x-3 gap-y-1 border-t border-black/[0.045] px-5 py-3.5 text-xs first:border-t-0 md:grid-cols-[minmax(220px,1.5fr)_minmax(140px,.8fr)_90px_120px_68px] md:gap-4 md:px-6">
                 <div className="flex min-w-0 items-center gap-3">
+                  <input type="checkbox" checked={selectedSet.has(transaction.id)} onChange={() => toggleSelected(transaction.id)} className="size-4 shrink-0 accent-forest-800" aria-label={`Select ${transaction.description}`} />
                   <span className={`grid size-9 shrink-0 place-items-center rounded-xl ${income ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-700"}`}>
                     {income ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}
                   </span>

@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#123a63" />
     <meta name="description" content="A private, local-first monthly budget and spending tracker." />
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("cloud-budget-theme");
+          const dark = saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        } catch {}
+      })();
+    </script>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/cloud.svg" type="image/svg+xml" />
     <link rel="shortcut icon" href="./icons/cloud.svg" type="image/svg+xml" />

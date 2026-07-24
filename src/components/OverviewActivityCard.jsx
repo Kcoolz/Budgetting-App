@@ -10,7 +10,7 @@ export default function OverviewActivityCard({ transactions, currency }) {
   return (
     <Card className="relative overflow-hidden">
       <span className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-violet-400 via-blue-400 to-cyan-400" aria-hidden="true" />
-      <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-violet-50/45 to-transparent p-5 sm:p-6">
+      <div className="overview-activity-header flex items-start justify-between gap-4 bg-gradient-to-r from-violet-50/45 to-transparent p-5 sm:p-6">
         <div><p className="eyebrow">Recent activity</p><h2 className="mt-1 text-lg font-semibold tracking-[-0.025em]">Latest transactions</h2><p className="mt-1 text-xs text-slate-500">A quick check, not the full ledger.</p></div>
         {unreviewed > 0 && <span className="rounded-full bg-orange-50 px-2.5 py-1 text-[9px] font-bold text-orange-700">{unreviewed} to review</span>}
       </div>

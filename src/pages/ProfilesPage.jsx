@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { ArrowRight, Building2, Check, Download, Pencil, Plus, ShieldCheck, Trash2, Upload, UsersRound } from "lucide-react";
+import { ArrowRight, Building2, Check, Download, LockKeyhole, Pencil, Plus, ShieldCheck, Trash2, Upload, UsersRound } from "lucide-react";
 import PageIntro from "../components/PageIntro";
 import ProfileAvatar from "../components/ProfileAvatar";
 import Button from "../components/ui/Button";
@@ -14,7 +14,7 @@ function profileStats(profile) {
   ];
 }
 
-export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd, onEdit, onDelete, onExportAll, onImportAll }) {
+export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd, onEdit, onDelete, onExportAll, onImportAll, onEncryptedExport, onEncryptedImport, appLockEnabled, onConfigureLock, onLockNow }) {
   const fileInput = useRef(null);
   return (
     <>
@@ -28,8 +28,8 @@ export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd,
             event.target.value = "";
             if (file) onImportAll(file);
           }} />
-          <Button onClick={() => fileInput.current?.click()}><Upload className="size-4" /> Restore all</Button>
-          <Button onClick={onExportAll}><Download className="size-4" /> Backup all</Button>
+          <Button onClick={onEncryptedImport}><Upload className="size-4" /> Restore encrypted</Button>
+          <Button onClick={onEncryptedExport}><LockKeyhole className="size-4" /> Encrypted backup</Button>
           <Button variant="primary" onClick={onAdd}><Plus className="size-4" /> New profile</Button>
         </div>}
       />
@@ -83,7 +83,18 @@ export default function ProfilesPage({ profiles, activeProfile, onSwitch, onAdd,
           <Card className="p-5">
             <span className="grid size-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><ShieldCheck className="size-4" /></span>
             <h2 className="mt-4 text-sm font-semibold">Still private by design</h2>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">Profiles are stored only in this browser. They do not create online accounts or sync data between devices.</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">Profiles are stored only in this browser. Encrypted backups give you a portable recovery copy without adding an online account.</p>
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-black/5 pt-4">
+              <Button onClick={onConfigureLock}><LockKeyhole className="size-4" /> {appLockEnabled ? "Remove app lock" : "Add app lock"}</Button>
+              {appLockEnabled && <Button variant="primary" onClick={onLockNow}>Lock now</Button>}
+            </div>
+            <details className="mt-4 border-t border-black/5 pt-3">
+              <summary className="cursor-pointer text-[10px] font-bold text-slate-500">Plain JSON compatibility tools</summary>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button onClick={() => fileInput.current?.click()}><Upload className="size-4" /> Restore JSON</Button>
+                <Button onClick={onExportAll}><Download className="size-4" /> Export JSON</Button>
+              </div>
+            </details>
           </Card>
         </div>
       </div>

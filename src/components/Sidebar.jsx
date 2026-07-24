@@ -7,7 +7,7 @@ export default function Sidebar({ profileType = "personal" }) {
   const business = profileType === "business";
   const navigation = navigationFor(profileType);
   return (
-    <aside className={`fixed inset-y-0 left-0 z-20 hidden w-60 flex-col px-5 py-7 text-white lg:flex ${business ? "bg-[#102c2b]" : "bg-forest-900"}`} aria-label="Primary navigation">
+    <aside className={`app-sidebar fixed inset-y-0 left-0 z-20 hidden w-60 flex-col px-5 py-7 text-white lg:flex ${business ? "bg-[#102c2b]" : "bg-forest-900"}`} aria-label="Primary navigation">
       <Brand />
 
       {business && <div className="mt-6 flex items-center gap-2 rounded-xl border border-teal-200/10 bg-teal-300/[0.07] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-teal-200"><span className="size-1.5 rounded-full bg-teal-300" /> Business workspace</div>}

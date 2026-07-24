@@ -22,13 +22,15 @@ import {
 } from "../src/lib/budget.js";
 import { createProfileRecord, getProfileInitials, normalizeProfileStore } from "../src/lib/profiles.js";
 import { accountHasActivity, getAccountBalances, getAccountOverview, getLinkedDebts } from "../src/lib/accounts.js";
-import { parseTransactionFile, removeDuplicateTransactions } from "../src/lib/imports.js";
+import { inspectCsv, parseTransactionFile, parseTransactionFileWithMapping, removeDuplicateTransactions } from "../src/lib/imports.js";
 import {
   applyTransactionRules,
   getProjectedCashFlow,
   getReconciliationSnapshot,
+  matchTransactionToSchedule,
   suggestRecurringSchedules
 } from "../src/lib/planning.js";
+import { decryptBackup, encryptBackup, summarizeBackup } from "../src/lib/backup.js";
 
 test("monthly summary totals the selected month and builds daily sparkline data", () => {
   const state = createInitialState();
@@ -216,7 +218,7 @@ test("version one transactions migrate as reviewed and attach to a default accou
       { id: "old", type: "expense", amount: 25, date: "2026-07-02", category: "food", description: "Lunch" }
     ]
   });
-  assert.equal(state.version, 5);
+  assert.equal(state.version, 6);
   assert.equal(state.transactions[0].reviewed, true);
   assert.equal(state.transactions[0].accountId, "main");
   assert.equal(state.accounts.length, 1);
@@ -454,7 +456,7 @@ test("custom categories migrate safely and split spending reaches each budget", 
   });
 
   const summary = getMonthlySummary(state, "2026-07");
-  assert.equal(state.version, 5);
+  assert.equal(state.version, 6);
   assert.equal(summary.categorySpending["custom-pets"], 50);
   assert.equal(summary.categorySpending.food, 40);
   assert.equal(summary.expenses, 90);
@@ -519,4 +521,88 @@ test("reconciliation compares the statement against cleared activity only", () =
   const snapshot = getReconciliationSnapshot(state, "main", "2026-07-31", 145);
   assert.equal(snapshot.clearedBalance, 150);
   assert.equal(snapshot.difference, -5);
+});
+
+test("custom CSV mapping imports files with unfamiliar headers", () => {
+  const csv = [
+    "When,Vendor,Outflow,Inflow",
+    "2026-07-02,Corner Cafe,12.50,",
+    "2026-07-03,Payroll,,1500"
+  ].join("\n");
+  const inspection = inspectCsv(csv);
+  assert.deepEqual(inspection.headers, ["When", "Vendor", "Outflow", "Inflow"]);
+  const transactions = parseTransactionFileWithMapping(csv, {
+    date: "0",
+    description: "1",
+    amount: "",
+    debit: "2",
+    credit: "3"
+  });
+  assert.equal(transactions.length, 2);
+  assert.equal(transactions[0].type, "expense");
+  assert.equal(transactions[1].type, "income");
+});
+
+test("imported activity matches a nearby recurring occurrence", () => {
+  const transaction = {
+    type: "expense",
+    amount: 101,
+    date: "2026-07-15",
+    description: "NETFLIX.COM",
+    category: "other"
+  };
+  const matched = matchTransactionToSchedule(transaction, [{
+    id: "netflix",
+    type: "expense",
+    amount: 100,
+    description: "Netflix",
+    frequency: "monthly",
+    startDate: "2026-06-15",
+    active: true
+  }]);
+  assert.equal(matched.recurringId, "netflix");
+  assert.match(matched.recurringOccurrenceId, /^netflix-/);
+});
+
+test("goal normalization keeps linked accounts, automatic plans, and withdrawals", () => {
+  const state = normalizeState({
+    accounts: [{ id: "savings", name: "Savings", type: "savings", openingBalance: 500 }],
+    goals: [{
+      id: "trip",
+      name: "Trip",
+      target: 1000,
+      accountId: "savings",
+      autoContribution: { amount: 100, frequency: "biweekly", startDate: "2026-07-03" },
+      contributions: [
+        { id: "deposit", amount: 300, date: "2026-07-01" },
+        { id: "withdrawal", amount: -50, date: "2026-07-10" }
+      ]
+    }]
+  });
+  const [goal] = getGoalSummaries(state.goals, "2026-07");
+  assert.equal(goal.accountId, "savings");
+  assert.equal(goal.autoContribution.frequency, "biweekly");
+  assert.equal(goal.saved, 250);
+  assert.equal(goal.assignedThisMonth, 250);
+});
+
+test("encrypted backups round-trip and summarize private profile data", async () => {
+  const backup = {
+    format: "cloud-budget-profiles",
+    activeProfileId: "personal",
+    profiles: [{
+      id: "personal",
+      budget: {
+        transactions: [{ id: "one" }],
+        accounts: [{ id: "main" }],
+        goals: [{ id: "goal" }]
+      }
+    }]
+  };
+  const encrypted = await encryptBackup(backup, "correct horse battery staple");
+  assert.equal(JSON.parse(encrypted).format, "cloud-budget-encrypted");
+  const restored = await decryptBackup(encrypted, "correct horse battery staple");
+  assert.deepEqual(restored, backup);
+  assert.deepEqual(summarizeBackup(restored), { profiles: 1, transactions: 1, accounts: 1, goals: 1 });
+  await assert.rejects(() => decryptBackup(encrypted, "wrong password"), /incorrect|damaged/);
 });
